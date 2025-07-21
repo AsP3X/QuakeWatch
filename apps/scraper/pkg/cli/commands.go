@@ -9,13 +9,11 @@ import (
 	"quakewatch-scraper/internal/api"
 	"quakewatch-scraper/internal/collector"
 	"quakewatch-scraper/internal/storage"
-	"quakewatch-scraper/internal/utils"
 )
 
 // App represents the main CLI application
 type App struct {
 	rootCmd *cobra.Command
-	logger  *utils.Logger
 }
 
 // NewApp creates a new CLI application
@@ -99,8 +97,12 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	timeRangeCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
 	timeRangeCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
 	timeRangeCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
-	timeRangeCmd.MarkFlagRequired("start")
-	timeRangeCmd.MarkFlagRequired("end")
+	if err := timeRangeCmd.MarkFlagRequired("start"); err != nil {
+		panic(fmt.Sprintf("failed to mark start flag as required: %v", err))
+	}
+	if err := timeRangeCmd.MarkFlagRequired("end"); err != nil {
+		panic(fmt.Sprintf("failed to mark end flag as required: %v", err))
+	}
 	cmd.AddCommand(timeRangeCmd)
 
 	// Magnitude command
@@ -113,8 +115,12 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	magnitudeCmd.Flags().Float64("max", 10.0, "Maximum magnitude")
 	magnitudeCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
 	magnitudeCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
-	magnitudeCmd.MarkFlagRequired("min")
-	magnitudeCmd.MarkFlagRequired("max")
+	if err := magnitudeCmd.MarkFlagRequired("min"); err != nil {
+		panic(fmt.Sprintf("failed to mark min flag as required: %v", err))
+	}
+	if err := magnitudeCmd.MarkFlagRequired("max"); err != nil {
+		panic(fmt.Sprintf("failed to mark max flag as required: %v", err))
+	}
 	cmd.AddCommand(magnitudeCmd)
 
 	// Significant command
@@ -127,8 +133,12 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	significantCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
 	significantCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
 	significantCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
-	significantCmd.MarkFlagRequired("start")
-	significantCmd.MarkFlagRequired("end")
+	if err := significantCmd.MarkFlagRequired("start"); err != nil {
+		panic(fmt.Sprintf("failed to mark start flag as required: %v", err))
+	}
+	if err := significantCmd.MarkFlagRequired("end"); err != nil {
+		panic(fmt.Sprintf("failed to mark end flag as required: %v", err))
+	}
 	cmd.AddCommand(significantCmd)
 
 	// Region command
@@ -143,10 +153,18 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	regionCmd.Flags().Float64("max-lon", 180.0, "Maximum longitude")
 	regionCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
 	regionCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
-	regionCmd.MarkFlagRequired("min-lat")
-	regionCmd.MarkFlagRequired("max-lat")
-	regionCmd.MarkFlagRequired("min-lon")
-	regionCmd.MarkFlagRequired("max-lon")
+	if err := regionCmd.MarkFlagRequired("min-lat"); err != nil {
+		panic(fmt.Sprintf("failed to mark min-lat flag as required: %v", err))
+	}
+	if err := regionCmd.MarkFlagRequired("max-lat"); err != nil {
+		panic(fmt.Sprintf("failed to mark max-lat flag as required: %v", err))
+	}
+	if err := regionCmd.MarkFlagRequired("min-lon"); err != nil {
+		panic(fmt.Sprintf("failed to mark min-lon flag as required: %v", err))
+	}
+	if err := regionCmd.MarkFlagRequired("max-lon"); err != nil {
+		panic(fmt.Sprintf("failed to mark max-lon flag as required: %v", err))
+	}
 	cmd.AddCommand(regionCmd)
 
 	return cmd
@@ -642,7 +660,9 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\nThis will permanently delete %d files. Are you sure? (y/N): ", totalFiles)
 
 		var response string
-		fmt.Scanln(&response)
+		if _, err := fmt.Scanln(&response); err != nil {
+			return fmt.Errorf("failed to read user input: %w", err)
+		}
 
 		if response != "y" && response != "Y" && response != "yes" && response != "YES" {
 			fmt.Println("Operation cancelled.")
@@ -719,5 +739,7 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	fmt.Println()
 
 	// Show the help after the banner
-	cmd.Help()
+	if err := cmd.Help(); err != nil {
+		fmt.Printf("Error showing help: %v\n", err)
+	}
 }
