@@ -1,41 +1,45 @@
 # QuakeWatch - Master Project Plan
 
 ## Project Overview
-This project aims to create a comprehensive system for gathering, cleaning, storing, and displaying fault data from the EMSC-CSEM (European-Mediterranean Seismological Centre) API. The system consists of two main components: a data scraper and a web application.
+This project aims to create a comprehensive system for gathering, cleaning, storing, and displaying earthquake and fault data from multiple seismological sources. The system is organized as a monorepo with separate applications for data collection and web presentation.
 
 ## Project Structure
-This master plan provides an overview of the entire QuakeWatch system. For detailed implementation plans, please refer to:
+This master plan provides an overview of the entire QuakeWatch system organized as a monorepo. For detailed implementation plans, please refer to:
 
-- **[Data Scraper Plan](./scraper-plan.md)** - Complete implementation plan for the Node.js data scraper
+- **[Data Scraper Plan](./scraper-plan.md)** - Complete implementation plan for the standalone Node.js data scraper application
 - **[Website Plan](./website-plan.md)** - Complete implementation plan for the Next.js web application
+- **[Database Plan](./database-plan.md)** - Database schema and management
 - **[Color Pattern Design](./color-pattern-design.md)** - Design system and color scheme
 
-## Data Source
-- **URL**: https://www.emsc-csem.org/javascript/gem_active_faults.geojson
+## Data Sources
+- **USGS Earthquake API**: Real-time earthquake data (https://earthquake.usgs.gov/earthquakes/feed/v1.0/)
+- **EMSC-CSEM API**: Fault data (https://www.emsc-csem.org/javascript/gem_active_faults.geojson)
 - **Format**: GeoJSON
-- **Content**: Active fault data with geographical coordinates and fault properties
+- **Content**: Earthquake and fault data with geographical coordinates and properties
 
 ## System Architecture Overview
 
-### 1. Data Scraper (JavaScript/Node.js)
-**Purpose**: Fetch, validate, and clean fault data from the EMSC-CSEM API
+### 1. Data Scraper (Standalone Node.js Application)
+**Purpose**: Fetch, validate, and clean earthquake and fault data from multiple seismological APIs
 
 **Key Components**:
 - Data Fetcher with retry mechanisms and rate limiting
-- Data Validator with schema validation
+- Data Validator with schema validation for multiple data types
 - Data Cleaner for transformation and normalization
 - Scheduler for automated data collection
 - Logger for comprehensive monitoring
+- Real-time earthquake data collection (every 5-15 minutes)
 
 **For detailed implementation**: See [scraper-plan.md](./scraper-plan.md)
 
-### 2. Web Application (Next.js)
-**Purpose**: Display fault data with interactive maps and analytics
+### 2. Web Application (Next.js Application)
+**Purpose**: Display real-time earthquake data with interactive maps, user authentication, and analytics
 
 **Key Components**:
 - React-based frontend with TypeScript
 - Next.js API routes for backend functionality
 - Interactive map visualization with Leaflet.js
+- User authentication and role-based access control
 - Data display components and analytics dashboard
 - Search, filtering, and export capabilities
 

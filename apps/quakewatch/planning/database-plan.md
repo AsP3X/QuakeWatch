@@ -20,7 +20,429 @@ The QuakeWatch Database is a PostgreSQL-based system with PostGIS extension desi
 
 ## Database Schema Design
 
-### 1. Core Fault Data Tables
+### 1. User Management Tables
+
+#### Users Table
+```sql
+-- User accounts for authentication and personalization
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    role_id INTEGER REFERENCES roles(id) DEFAULT 1, -- Default to 'user' role
+    email_verified BOOLEAN DEFAULT FALSE,
+    email_verification_token VARCHAR(255),
+    reset_password_token VARCHAR(255),
+    reset_password_expires TIMESTAMP,
+    preferences JSONB DEFAULT '{}',
+    last_login TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for performance
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role_id ON users(role_id);
+CREATE INDEX idx_users_created_at ON users(created_at);
+CREATE INDEX idx_users_last_login ON users(last_login);
+CREATE INDEX idx_users_is_active ON users(is_active);
+```
+
+#### Roles Table
+```sql
+-- User roles for role-based access control
+CREATE TABLE roles (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    is_system_role BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes
+CREATE INDEX idx_roles_name ON roles(name);
+CREATE INDEX idx_roles_is_system_role ON roles(is_system_role);
+```
+
+#### Permissions Table
+```sql
+-- Granular permissions for fine-grained access control
+CREATE TABLE permissions (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    resource VARCHAR(50) NOT NULL, -- e.g., 'earthquakes', 'users', 'admin'
+    action VARCHAR(50) NOT NULL,   -- e.g., 'read', 'write', 'delete', 'manage'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes
+CREATE INDEX idx_permissions_name ON permissions(name);
+CREATE INDEX idx_permissions_resource ON permissions(resource);
+CREATE INDEX idx_permissions_action ON permissions(action);
+CREATE INDEX idx_permissions_resource_action ON permissions(resource, action);
+```
+
+#### Role Permissions Table
+```sql
+-- Many-to-many relationship between roles and permissions
+CREATE TABLE role_permissions (
+    id SERIAL PRIMARY KEY,
+    role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id INTEGER REFERENCES permissions(id) ON DELETE CASCADE,
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(role_id, permission_id)
+);
+
+-- Indexes
+CREATE INDEX idx_role_permissions_role_id ON role_permissions(role_id);
+CREATE INDEX idx_role_permissions_permission_id ON role_permissions(permission_id);
+```
+
+#### User Permissions Table (for custom user permissions)
+```sql
+-- Individual user permissions (overrides role permissions)
+CREATE TABLE user_permissions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    permission_id INTEGER REFERENCES permissions(id) ON DELETE CASCADE,
+    is_granted BOOLEAN DEFAULT TRUE, -- TRUE = granted, FALSE = denied
+    granted_by INTEGER REFERENCES users(id),
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    
+    UNIQUE(user_id, permission_id)
+);
+
+-- Indexes
+CREATE INDEX idx_user_permissions_user_id ON user_permissions(user_id);
+CREATE INDEX idx_user_permissions_permission_id ON user_permissions(permission_id);
+CREATE INDEX idx_user_permissions_is_granted ON user_permissions(is_granted);
+CREATE INDEX idx_user_permissions_expires_at ON user_permissions(expires_at);
+```
+
+### Default Roles and Permissions Data
+
+#### Insert Default Roles
+```sql
+-- Insert default system roles
+INSERT INTO roles (id, name, description, is_system_role) VALUES
+(1, 'user', 'Regular user with basic access', TRUE),
+(2, 'moderator', 'Moderator with enhanced access', TRUE),
+(3, 'admin', 'Administrator with full system access', TRUE),
+(4, 'super_admin', 'Super administrator with all privileges', TRUE);
+```
+
+#### Insert Default Permissions
+```sql
+-- Earthquake permissions
+INSERT INTO permissions (name, description, resource, action) VALUES
+('earthquakes:read', 'View earthquake data', 'earthquakes', 'read'),
+('earthquakes:write', 'Create earthquake records', 'earthquakes', 'write'),
+('earthquakes:update', 'Update earthquake data', 'earthquakes', 'update'),
+('earthquakes:delete', 'Delete earthquake records', 'earthquakes', 'delete'),
+('earthquakes:export', 'Export earthquake data', 'earthquakes', 'export'),
+
+-- User management permissions
+('users:read', 'View user profiles', 'users', 'read'),
+('users:write', 'Create user accounts', 'users', 'write'),
+('users:update', 'Update user profiles', 'users', 'update'),
+('users:delete', 'Delete user accounts', 'users', 'delete'),
+('users:manage_roles', 'Manage user roles', 'users', 'manage_roles'),
+
+-- Admin permissions
+('admin:dashboard', 'Access admin dashboard', 'admin', 'dashboard'),
+('admin:statistics', 'View system statistics', 'admin', 'statistics'),
+('admin:system_health', 'View system health', 'admin', 'system_health'),
+('admin:data_management', 'Manage system data', 'admin', 'data_management'),
+
+-- Role and permission management
+('roles:read', 'View roles', 'roles', 'read'),
+('roles:write', 'Create roles', 'roles', 'write'),
+('roles:update', 'Update roles', 'roles', 'update'),
+('roles:delete', 'Delete roles', 'roles', 'delete'),
+('permissions:manage', 'Manage permissions', 'permissions', 'manage');
+```
+
+#### Assign Permissions to Roles
+```sql
+-- User role permissions (basic access)
+INSERT INTO role_permissions (role_id, permission_id) 
+SELECT 1, id FROM permissions WHERE name IN (
+    'earthquakes:read',
+    'users:read'
+);
+
+-- Moderator role permissions (enhanced access)
+INSERT INTO role_permissions (role_id, permission_id) 
+SELECT 2, id FROM permissions WHERE name IN (
+    'earthquakes:read',
+    'earthquakes:write',
+    'earthquakes:update',
+    'earthquakes:export',
+    'users:read',
+    'users:update',
+    'admin:statistics'
+);
+
+-- Admin role permissions (full access except super admin features)
+INSERT INTO role_permissions (role_id, permission_id) 
+SELECT 3, id FROM permissions WHERE name NOT IN (
+    'roles:delete',
+    'permissions:manage'
+);
+
+-- Super admin role permissions (all permissions)
+INSERT INTO role_permissions (role_id, permission_id) 
+SELECT 4, id FROM permissions;
+```
+
+### Permission Checking Functions
+
+#### Check User Permission Function
+```sql
+-- Function to check if a user has a specific permission
+CREATE OR REPLACE FUNCTION check_user_permission(
+    p_user_id INTEGER,
+    p_permission_name VARCHAR(100)
+) RETURNS BOOLEAN AS $$
+DECLARE
+    user_role_id INTEGER;
+    has_permission BOOLEAN := FALSE;
+    user_permission_override BOOLEAN;
+BEGIN
+    -- Get user's role
+    SELECT role_id INTO user_role_id FROM users WHERE id = p_user_id AND is_active = TRUE;
+    
+    IF user_role_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Check for user-specific permission override (deny takes precedence)
+    SELECT is_granted INTO user_permission_override
+    FROM user_permissions up
+    JOIN permissions p ON up.permission_id = p.id
+    WHERE up.user_id = p_user_id 
+    AND p.name = p_permission_name
+    AND (up.expires_at IS NULL OR up.expires_at > CURRENT_TIMESTAMP);
+    
+    -- If there's a user-specific override, return that
+    IF user_permission_override IS NOT NULL THEN
+        RETURN user_permission_override;
+    END IF;
+    
+    -- Check role-based permissions
+    SELECT EXISTS(
+        SELECT 1 FROM role_permissions rp
+        JOIN permissions p ON rp.permission_id = p.id
+        WHERE rp.role_id = user_role_id AND p.name = p_permission_name
+    ) INTO has_permission;
+    
+    RETURN has_permission;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+#### Get User Permissions Function
+```sql
+-- Function to get all permissions for a user
+CREATE OR REPLACE FUNCTION get_user_permissions(p_user_id INTEGER)
+RETURNS TABLE(permission_name VARCHAR(100), resource VARCHAR(50), action VARCHAR(50)) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT DISTINCT p.name, p.resource, p.action
+    FROM permissions p
+    WHERE EXISTS(
+        -- Role-based permissions
+        SELECT 1 FROM role_permissions rp
+        JOIN users u ON u.role_id = rp.role_id
+        WHERE rp.permission_id = p.id AND u.id = p_user_id AND u.is_active = TRUE
+    )
+    OR EXISTS(
+        -- User-specific granted permissions
+        SELECT 1 FROM user_permissions up
+        WHERE up.permission_id = p.id 
+        AND up.user_id = p_user_id 
+        AND up.is_granted = TRUE
+        AND (up.expires_at IS NULL OR up.expires_at > CURRENT_TIMESTAMP)
+    )
+    AND NOT EXISTS(
+        -- User-specific denied permissions (take precedence)
+        SELECT 1 FROM user_permissions up
+        WHERE up.permission_id = p.id 
+        AND up.user_id = p_user_id 
+        AND up.is_granted = FALSE
+        AND (up.expires_at IS NULL OR up.expires_at > CURRENT_TIMESTAMP)
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+#### Grant User Permission Function
+```sql
+-- Function to grant a permission to a user
+CREATE OR REPLACE FUNCTION grant_user_permission(
+    p_user_id INTEGER,
+    p_permission_name VARCHAR(100),
+    p_granted_by INTEGER,
+    p_expires_at TIMESTAMP DEFAULT NULL
+) RETURNS BOOLEAN AS $$
+DECLARE
+    permission_id INTEGER;
+BEGIN
+    -- Get permission ID
+    SELECT id INTO permission_id FROM permissions WHERE name = p_permission_name;
+    
+    IF permission_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Insert or update user permission
+    INSERT INTO user_permissions (user_id, permission_id, is_granted, granted_by, expires_at)
+    VALUES (p_user_id, permission_id, TRUE, p_granted_by, p_expires_at)
+    ON CONFLICT (user_id, permission_id) 
+    DO UPDATE SET 
+        is_granted = TRUE,
+        granted_by = p_granted_by,
+        expires_at = p_expires_at,
+        granted_at = CURRENT_TIMESTAMP;
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+
+#### Revoke User Permission Function
+```sql
+-- Function to revoke a permission from a user
+CREATE OR REPLACE FUNCTION revoke_user_permission(
+    p_user_id INTEGER,
+    p_permission_name VARCHAR(100),
+    p_revoked_by INTEGER
+) RETURNS BOOLEAN AS $$
+DECLARE
+    permission_id INTEGER;
+BEGIN
+    -- Get permission ID
+    SELECT id INTO permission_id FROM permissions WHERE name = p_permission_name;
+    
+    IF permission_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Insert or update user permission as denied
+    INSERT INTO user_permissions (user_id, permission_id, is_granted, granted_by)
+    VALUES (p_user_id, permission_id, FALSE, p_revoked_by)
+    ON CONFLICT (user_id, permission_id) 
+    DO UPDATE SET 
+        is_granted = FALSE,
+        granted_by = p_revoked_by,
+        expires_at = NULL,
+        granted_at = CURRENT_TIMESTAMP;
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+```
+```
+
+#### User Sessions Table
+```sql
+-- User session management for authentication
+CREATE TABLE user_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    session_token VARCHAR(255) UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for performance
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_token ON user_sessions(session_token);
+CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
+```
+
+### 2. Earthquake Data Tables
+
+#### Earthquakes Table
+```sql
+-- Main earthquakes table storing real-time earthquake data
+CREATE TABLE earthquakes (
+    id SERIAL PRIMARY KEY,
+    external_id VARCHAR(100) UNIQUE NOT NULL,
+    magnitude DECIMAL(3,1) NOT NULL,
+    magnitude_type VARCHAR(10),
+    depth DECIMAL(8,3),
+    latitude DECIMAL(10,7) NOT NULL,
+    longitude DECIMAL(10,7) NOT NULL,
+    location VARCHAR(255),
+    region VARCHAR(255),
+    country VARCHAR(100),
+    time TIMESTAMP NOT NULL,
+    updated_time TIMESTAMP,
+    
+    -- Geographical data
+    geometry GEOMETRY(POINT, 4326),
+    
+    -- Additional data
+    place VARCHAR(500),
+    type VARCHAR(50),
+    status VARCHAR(50),
+    tsunami BOOLEAN DEFAULT FALSE,
+    felt_count INTEGER,
+    significance INTEGER,
+    
+    -- Metadata
+    source VARCHAR(100),
+    raw_data JSONB,
+    
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Constraints
+    CONSTRAINT valid_magnitude CHECK (magnitude >= 0),
+    CONSTRAINT valid_depth CHECK (depth >= 0),
+    CONSTRAINT valid_coordinates CHECK (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_earthquakes_external_id ON earthquakes(external_id);
+CREATE INDEX idx_earthquakes_magnitude ON earthquakes(magnitude);
+CREATE INDEX idx_earthquakes_time ON earthquakes(time);
+CREATE INDEX idx_earthquakes_geometry ON earthquakes USING GIST(geometry);
+CREATE INDEX idx_earthquakes_location ON earthquakes(location);
+CREATE INDEX idx_earthquakes_region ON earthquakes(region);
+CREATE INDEX idx_earthquakes_country ON earthquakes(country);
+CREATE INDEX idx_earthquakes_created_at ON earthquakes(created_at);
+```
+
+#### User Earthquakes Table
+```sql
+-- User's saved earthquakes and personal notes
+CREATE TABLE user_earthquakes (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    earthquake_id INTEGER REFERENCES earthquakes(id) ON DELETE CASCADE,
+    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    
+    UNIQUE(user_id, earthquake_id)
+);
+
+-- Indexes for performance
+CREATE INDEX idx_user_earthquakes_user_id ON user_earthquakes(user_id);
+CREATE INDEX idx_user_earthquakes_earthquake_id ON user_earthquakes(earthquake_id);
+CREATE INDEX idx_user_earthquakes_saved_at ON user_earthquakes(saved_at);
+```
+
+### 3. Core Fault Data Tables
 
 #### Faults Table
 ```sql
@@ -725,6 +1147,6 @@ CREATE POLICY fault_access_policy ON faults
 
 ## Conclusion
 
-The QuakeWatch Database provides a robust, scalable foundation for storing and querying fault data with advanced geographical capabilities. The comprehensive schema design supports both the data scraper and web application while maintaining data integrity and performance.
+The QuakeWatch Database provides a robust, scalable foundation for storing and querying both earthquake and fault data with advanced geographical capabilities. The comprehensive schema design supports user authentication, personalization, real-time earthquake monitoring, and fault data analysis while maintaining data integrity and performance.
 
-The database architecture is designed for future growth and can accommodate additional data sources, enhanced analytics, and advanced geographical features as the project evolves. 
+The database architecture includes user management for personalized experiences, real-time earthquake data for immediate monitoring, and fault data for geological analysis. The system is designed for future growth and can accommodate additional data sources, enhanced analytics, and advanced geographical features as the project evolves. 
