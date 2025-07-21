@@ -1,19 +1,24 @@
 package cli
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 
 	"quakewatch-scraper/internal/api"
 	"quakewatch-scraper/internal/collector"
+	"quakewatch-scraper/internal/config"
 	"quakewatch-scraper/internal/storage"
 )
 
 // App represents the main CLI application
 type App struct {
 	rootCmd *cobra.Command
+	cfg     *config.Config
 }
 
 // NewApp creates a new CLI application
@@ -24,6 +29,38 @@ func NewApp() *App {
 			Short: "QuakeWatch Data Scraper - Collect earthquake and fault data",
 			Long:  `A Go application for collecting earthquake and fault data from various sources and saving to JSON files.`,
 		},
+	}
+
+	// Set up the PersistentPreRunE after creating the app
+	app.rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// Skip configuration loading for version command
+		if cmd.Name() == "version" {
+			return nil
+		}
+
+		// Load configuration for all commands
+		configPath, _ := cmd.Flags().GetString("config")
+
+		// Only prompt for configuration if no command is given (showBanner)
+		if cmd.Name() == "quakewatch-scraper" {
+			// Load configuration - this will handle missing config files interactively
+			cfg, err := config.LoadConfig(configPath)
+			if err != nil {
+				return err
+			}
+			app.cfg = cfg
+		} else {
+			// For other commands, load configuration without prompting
+			cfg, err := config.LoadConfig(configPath)
+			if err != nil {
+				// If config loading fails, use default configuration
+				app.cfg = config.DefaultConfig()
+			} else {
+				app.cfg = cfg
+			}
+		}
+
+		return nil
 	}
 
 	app.setupCommands()
@@ -49,6 +86,7 @@ func (a *App) setupCommands() {
 	a.rootCmd.AddCommand(a.newPurgeCmd())
 	a.rootCmd.AddCommand(a.newHealthCmd())
 	a.rootCmd.AddCommand(a.newVersionCmd())
+	a.rootCmd.AddCommand(a.newConfigCmd())
 }
 
 func (a *App) setupFlags() {
@@ -65,7 +103,11 @@ func (a *App) Run(args []string) error {
 	if len(args) > 0 {
 		args = args[1:]
 	}
+
+	// Set up the command
 	a.rootCmd.SetArgs(args)
+
+	// Execute the command - configuration will be loaded in PreRun
 	return a.rootCmd.Execute()
 }
 
@@ -270,14 +312,33 @@ func (a *App) newVersionCmd() *cobra.Command {
 	return cmd
 }
 
+// newConfigCmd creates the configuration command
+func (a *App) newConfigCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Manage application configuration",
+		Long:  `Create or update the application configuration file through interactive prompts.`,
+		RunE:  a.runConfig,
+	}
+	return cmd
+}
+
 // Helper methods for command execution
 func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 30*time.Second)
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectRecent(limit, filename)
@@ -299,9 +360,17 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid end time format: %w", err)
 	}
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 30*time.Second)
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectByTimeRange(startTime, endTime, limit, filename)
@@ -313,9 +382,17 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 30*time.Second)
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectByMagnitude(minMag, maxMag, limit, filename)
@@ -337,9 +414,17 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 		return fmt.Errorf("invalid end time format: %w", err)
 	}
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 30*time.Second)
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectSignificant(startTime, endTime, limit, filename)
@@ -353,9 +438,17 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 30*time.Second)
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectByRegion(minLat, maxLat, minLon, maxLon, limit, filename)
@@ -364,9 +457,9 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 func (a *App) runCollectFaults(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("filename")
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	emscClient := api.NewEMSCClient("https://www.emsc-csem.org/javascript", 30*time.Second)
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
 	collector := collector.NewFaultCollector(emscClient, storage)
 
 	return collector.CollectFaults(filename)
@@ -377,9 +470,17 @@ func (a *App) runUpdateFaults(cmd *cobra.Command, args []string) error {
 	retries, _ := cmd.Flags().GetInt("retries")
 	retryDelay, _ := cmd.Flags().GetDuration("retry-delay")
 
-	// Initialize components
-	storage := storage.NewJSONStorage("./data")
-	emscClient := api.NewEMSCClient("https://www.emsc-csem.org/javascript", 30*time.Second)
+	// Use configuration values if not provided
+	if retries == 0 {
+		retries = a.cfg.Collection.RetryAttempts
+	}
+	if retryDelay == 0 {
+		retryDelay = a.cfg.Collection.RetryDelay
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
 	collector := collector.NewFaultCollector(emscClient, storage)
 
 	return collector.UpdateFaults(filename, retries, retryDelay)
@@ -389,7 +490,7 @@ func (a *App) runValidate(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	storage := storage.NewJSONStorage("./data")
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 
 	if file != "" {
 		// Validate specific file
@@ -461,7 +562,7 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	storage := storage.NewJSONStorage("./data")
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 
 	if file != "" {
 		// Show stats for specific file
@@ -550,7 +651,7 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 func (a *App) runList(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 
-	storage := storage.NewJSONStorage("./data")
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 
 	if dataType == "all" {
 		fmt.Println("Available data files:")
@@ -593,7 +694,7 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	storage := storage.NewJSONStorage("./data")
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 
 	if dryRun {
 		fmt.Println("DRY RUN - Files that would be deleted:")
@@ -690,7 +791,7 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	fmt.Println("System Health Check:")
 
 	// Check USGS API
-	usgsClient := api.NewUSGSClient("https://earthquake.usgs.gov/fdsnws/event/1", 10*time.Second)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, 10*time.Second)
 	_, err := usgsClient.GetRecentEarthquakes(1)
 	if err != nil {
 		fmt.Printf("  ✗ USGS API: %v\n", err)
@@ -699,7 +800,7 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check EMSC API
-	emscClient := api.NewEMSCClient("https://www.emsc-csem.org/javascript", 10*time.Second)
+	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, 10*time.Second)
 	_, err = emscClient.GetFaults()
 	if err != nil {
 		fmt.Printf("  ✗ EMSC API: %v\n", err)
@@ -708,12 +809,23 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check storage
-	storage := storage.NewJSONStorage("./data")
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	_, err = storage.ListFiles("earthquakes")
 	if err != nil {
 		fmt.Printf("  ✗ Storage: %v\n", err)
 	} else {
 		fmt.Println("  ✓ Storage: OK")
+	}
+
+	// Check database if enabled
+	if a.cfg.Database.Enabled {
+		if err := a.checkDatabaseHealth(); err != nil {
+			fmt.Printf("  ✗ Database: %v\n", err)
+		} else {
+			fmt.Println("  ✓ Database: OK")
+		}
+	} else {
+		fmt.Println("  ⚪ Database: Disabled")
 	}
 
 	return nil
@@ -723,6 +835,56 @@ func (a *App) runVersion(cmd *cobra.Command, args []string) {
 	fmt.Println("QuakeWatch Scraper v1.0.0")
 	fmt.Println("Go version: 1.21")
 	fmt.Println("Build date: " + time.Now().Format("2006-01-02"))
+}
+
+func (a *App) runConfig(cmd *cobra.Command, args []string) error {
+	configPath, _ := cmd.Flags().GetString("config")
+
+	fmt.Println("QuakeWatch Scraper Configuration Setup")
+	fmt.Println("=====================================")
+
+	// Create configuration interactively
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to create configuration: %w", err)
+	}
+
+	// Update the app's configuration
+	a.cfg = cfg
+
+	fmt.Println("\nConfiguration setup completed successfully!")
+	return nil
+}
+
+// checkDatabaseHealth checks the database connectivity
+func (a *App) checkDatabaseHealth() error {
+	// Build connection string
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		a.cfg.Database.Host,
+		a.cfg.Database.Port,
+		a.cfg.Database.User,
+		a.cfg.Database.Password,
+		a.cfg.Database.Database,
+		a.cfg.Database.SSLMode,
+	)
+
+	// Try to connect to the database
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return fmt.Errorf("failed to open database connection: %w", err)
+	}
+	defer db.Close()
+
+	// Set connection timeout
+	ctx, cancel := context.WithTimeout(context.Background(), a.cfg.Database.ConnectionTimeout)
+	defer cancel()
+
+	// Test the connection
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return nil
 }
 
 // showBanner displays the application banner when no command is provided

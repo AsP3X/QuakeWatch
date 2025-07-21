@@ -66,4 +66,41 @@ test-faults: build
 
 # Test purge command (dry run)
 test-purge: build
-	./bin/quakewatch-scraper purge --dry-run 
+	./bin/quakewatch-scraper purge --dry-run
+
+# Database commands
+db-migrate-up: build
+	./bin/quakewatch-scraper db migrate up
+
+db-migrate-down: build
+	./bin/quakewatch-scraper db migrate down
+
+db-status: build
+	./bin/quakewatch-scraper db status
+
+db-init: build
+	./bin/quakewatch-scraper db init
+
+# Database setup with Docker (requires Docker)
+db-setup-docker:
+	docker run --name quakewatch-postgres \
+		-e POSTGRES_DB=quakewatch \
+		-e POSTGRES_USER=postgres \
+		-e POSTGRES_PASSWORD=postgres \
+		-p 5432:5432 \
+		-d postgres:15
+
+db-stop-docker:
+	docker stop quakewatch-postgres || true
+	docker rm quakewatch-postgres || true
+
+# Environment setup
+setup-env:
+	@echo "Setting up environment variables..."
+	@echo "DB_HOST=localhost" > .env
+	@echo "DB_PORT=5432" >> .env
+	@echo "DB_USER=postgres" >> .env
+	@echo "DB_PASSWORD=postgres" >> .env
+	@echo "DB_NAME=quakewatch" >> .env
+	@echo "DB_SSL_MODE=disable" >> .env
+	@echo "Environment file created: .env" 
