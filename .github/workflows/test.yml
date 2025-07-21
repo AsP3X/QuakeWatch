@@ -79,7 +79,7 @@ jobs:
           go build -o bin/quakewatch-scraper cmd/scraper/main.go
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: quakewatch-scraper
           path: apps/scraper/bin/quakewatch-scraper 
