@@ -42,6 +42,7 @@ The current scraper supports the following earthquake collection commands:
 3. **Conditional execution** - Skip execution if no new data is available
 4. **Backoff strategy** - Implement exponential backoff for API failures
 5. **Health checks** - Monitor system health during long-running intervals
+6. **Daemon mode** - Run in background as a daemon process with PID file management
 
 ## Technical Design
 
@@ -76,6 +77,9 @@ quakewatch-scraper interval custom [options]
 --continue-on-error          # Continue running on individual command failures
 --skip-empty                 # Skip execution if no new data is found
 --health-check-interval string # Health check interval
+--daemon, -d                 # Run in daemon mode (background)
+--pid-file string            # PID file location (default: /var/run/quakewatch-scraper.pid)
+--log-file string            # Log file location for daemon mode
 ```
 
 #### Examples
@@ -96,6 +100,13 @@ quakewatch-scraper interval earthquakes country \
 quakewatch-scraper interval custom \
   --interval 1h \
   --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31"
+
+# Run in daemon mode (background)
+quakewatch-scraper interval earthquakes recent --interval 5m --daemon --log-file /var/log/quakewatch-scraper.log
+
+# Daemon mode with custom PID file
+quakewatch-scraper interval earthquakes country --country "Japan" --interval 1h --daemon --pid-file /tmp/quakewatch-japan.pid
+```
 ```
 
 ## Implementation Plan
@@ -109,7 +120,8 @@ internal/
 │   ├── interval.go          # Core interval scheduling logic
 │   ├── executor.go          # Command execution engine
 │   ├── backoff.go           # Backoff strategies
-│   └── health.go            # Health monitoring
+│   ├── health.go            # Health monitoring
+│   └── daemon.go            # Daemon process management
 ├── models/
 │   └── interval.go          # Interval configuration models
 ```
@@ -126,6 +138,9 @@ type IntervalConfig struct {
     ContinueOnError    bool          `mapstructure:"continue_on_error"`
     SkipEmpty          bool          `mapstructure:"skip_empty"`
     HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+    DaemonMode         bool          `mapstructure:"daemon_mode"`
+    PIDFile            string        `mapstructure:"pid_file"`
+    LogFile            string        `mapstructure:"log_file"`
 }
 ```
 
@@ -139,11 +154,13 @@ type IntervalScheduler struct {
     logger     *log.Logger
     stopChan   chan struct{}
     doneChan   chan struct{}
+    daemon     *DaemonManager
 }
 
 func (s *IntervalScheduler) Start(ctx context.Context, command string, args []string) error
 func (s *IntervalScheduler) Stop() error
 func (s *IntervalScheduler) IsRunning() bool
+func (s *IntervalScheduler) StartDaemon(ctx context.Context, command string, args []string) error
 ```
 
 **Command Executor (`internal/scheduler/executor.go`)**
@@ -156,6 +173,22 @@ type CommandExecutor struct {
 
 func (e *CommandExecutor) Execute(ctx context.Context, command string, args []string) error
 func (e *CommandExecutor) ExecuteWithRetry(ctx context.Context, command string, args []string) error
+```
+
+**Daemon Manager (`internal/scheduler/daemon.go`)**
+```go
+type DaemonManager struct {
+    pidFile    string
+    logFile    string
+    logger     *log.Logger
+}
+
+func (d *DaemonManager) Start() error
+func (d *DaemonManager) Stop() error
+func (d *DaemonManager) IsRunning() bool
+func (d *DaemonManager) WritePID() error
+func (d *DaemonManager) RemovePID() error
+func (d *DaemonManager) SetupLogging() error
 ```
 
 ### Phase 2: CLI Integration
@@ -184,6 +217,7 @@ func (a *App) newIntervalCmd() *cobra.Command {
 func (a *App) runIntervalEarthquakes(cmd *cobra.Command, args []string) error
 func (a *App) runIntervalFaults(cmd *cobra.Command, args []string) error
 func (a *App) runIntervalCustom(cmd *cobra.Command, args []string) error
+func (a *App) handleDaemonMode(cmd *cobra.Command, args []string) error
 ```
 
 ### Phase 3: Advanced Features
@@ -235,6 +269,48 @@ interval:
     continue_on_error: true
     skip_empty: false
     health_check_interval: 5m
+    daemon_mode: false
+    pid_file: /var/run/quakewatch-scraper.pid
+    log_file: /var/log/quakewatch-scraper.log
+```
+
+## Daemon Mode Implementation
+
+### Daemon Process Management
+1. **Process Detachment** - Fork and detach from parent process
+2. **PID File Management** - Create and manage PID file for process tracking
+3. **Signal Handling** - Handle SIGTERM, SIGINT, SIGHUP for graceful shutdown
+4. **Logging Redirection** - Redirect stdout/stderr to log files
+5. **Working Directory** - Set appropriate working directory for daemon
+
+### Daemon Lifecycle
+```go
+// Daemon startup sequence
+1. Parse command line arguments
+2. Check if daemon is already running (PID file)
+3. Fork process and detach from parent
+4. Set up signal handlers
+5. Create PID file
+6. Redirect logging to file
+7. Start interval scheduler
+8. Wait for shutdown signal
+9. Clean up PID file and exit
+```
+
+### Daemon Control Commands
+```bash
+# Start daemon
+quakewatch-scraper interval earthquakes recent --interval 5m --daemon
+
+# Check daemon status
+ps aux | grep quakewatch-scraper
+cat /var/run/quakewatch-scraper.pid
+
+# Stop daemon
+kill $(cat /var/run/quakewatch-scraper.pid)
+
+# Restart daemon
+kill $(cat /var/run/quakewatch-scraper.pid) && sleep 2 && quakewatch-scraper interval earthquakes recent --interval 5m --daemon
 ```
 
 ## Error Handling Strategy
@@ -243,6 +319,7 @@ interval:
 1. **Transient Errors** - API timeouts, network issues (retry with backoff)
 2. **Permanent Errors** - Invalid parameters, authentication failures (stop execution)
 3. **Resource Errors** - Memory/disk space issues (pause and retry)
+4. **Daemon Errors** - PID file conflicts, permission issues, signal handling failures
 
 ### Error Recovery
 - Implement exponential backoff for transient errors
@@ -267,6 +344,12 @@ interval:
 - Implement intelligent delays between requests
 - Track and log API usage patterns
 
+### Daemon Resource Management
+- Monitor daemon process resources
+- Implement log rotation for long-running daemons
+- Handle daemon restart scenarios
+- Manage multiple daemon instances
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -274,12 +357,18 @@ interval:
 - Test backoff strategies
 - Test command execution engine
 - Test error handling scenarios
+- Test daemon process management
+- Test PID file operations
+- Test signal handling
 
 ### Integration Tests
 - Test full interval execution cycles
 - Test with real API endpoints
 - Test resource management
 - Test graceful shutdown
+- Test daemon mode with real intervals
+- Test daemon restart scenarios
+- Test multiple daemon instances
 
 ### Performance Tests
 - Test memory usage over long periods
@@ -298,6 +387,8 @@ interval:
 - Secure file permissions
 - Validation of file paths
 - Protection against path traversal attacks
+- Secure PID file permissions
+- Log file access controls
 
 ### Network Security
 - TLS certificate validation
@@ -333,6 +424,8 @@ interval:
 - Service file configuration
 - Restart policies
 - Log management
+- Daemon integration with systemd
+- PID file management
 
 ### Kubernetes Support
 - Deployment manifests
@@ -392,16 +485,22 @@ interval:
 - Implement interval scheduler
 - Add basic CLI commands
 - Create configuration structure
+- Implement daemon process management
+- Add PID file handling
 
 ### Phase 2 (Week 3-4): Advanced Features
 - Implement backoff strategies
 - Add health monitoring
 - Create metrics collection
+- Implement signal handling for daemon
+- Add log rotation and management
 
 ### Phase 3 (Week 5-6): Testing and Documentation
 - Comprehensive testing
 - Documentation updates
 - Performance optimization
+- Daemon mode testing
+- Systemd service integration
 
 ### Phase 4 (Week 7): Deployment and Monitoring
 - Deployment preparation
