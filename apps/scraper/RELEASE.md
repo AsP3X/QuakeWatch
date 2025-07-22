@@ -46,7 +46,6 @@ The project includes a test workflow that runs on:
 
 This workflow:
 - Runs tests
-- Runs linting
 - Builds the application for the current platform
 
 ### Local Development

@@ -628,10 +628,6 @@ install:
 fmt:
 	go fmt ./...
 
-# Lint code
-lint:
-	golangci-lint run
-
 # Generate documentation
 docs:
 	godoc -http=:6060

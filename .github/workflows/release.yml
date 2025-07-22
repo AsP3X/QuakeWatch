@@ -10,9 +10,53 @@ env:
   GO_VERSION: '1.24'
 
 jobs:
+  test-and-build:
+    name: Test and Build Verification
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Verify dependencies
+        working-directory: apps/scraper
+        run: go mod verify
+
+      - name: Tidy dependencies
+        working-directory: apps/scraper
+        run: go mod tidy
+
+      - name: Download dependencies
+        working-directory: apps/scraper
+        run: go mod download
+
+      - name: Run tests
+        working-directory: apps/scraper
+        run: go test -v ./...
+
+      - name: Build verification
+        working-directory: apps/scraper
+        run: go build -v ./...
+
   build:
     name: Build for ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest
+    needs: test-and-build
     strategy:
       matrix:
         include:

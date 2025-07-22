@@ -422,9 +422,6 @@ go test -v ./...
 # Format code
 make fmt
 
-# Lint code (requires golangci-lint)
-make lint
-
 # Generate documentation
 make docs
 ```
