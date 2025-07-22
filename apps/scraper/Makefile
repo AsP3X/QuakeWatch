@@ -1,5 +1,5 @@
 # Makefile for QuakeWatch Scraper
-.PHONY: build clean test run install fmt lint docs
+.PHONY: build clean test run install fmt docs
 
 # Build the application
 build:
@@ -38,10 +38,6 @@ install:
 # Format code
 fmt:
 	go fmt ./...
-
-# Lint code
-lint:
-	golangci-lint run
 
 # Generate documentation
 docs:

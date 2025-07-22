@@ -16,6 +16,7 @@ type Config struct {
 	Logging    LoggingConfig    `mapstructure:"logging"`
 	Collection CollectionConfig `mapstructure:"collection"`
 	Database   DatabaseConfig   `mapstructure:"database"`
+	Interval   IntervalConfig   `mapstructure:"interval"`
 }
 
 // APIConfig contains API-related configuration
@@ -57,6 +58,21 @@ type CollectionConfig struct {
 	MaxLimit      int           `mapstructure:"max_limit"`
 	RetryAttempts int           `mapstructure:"retry_attempts"`
 	RetryDelay    time.Duration `mapstructure:"retry_delay"`
+}
+
+// IntervalConfig contains interval scraping configuration
+type IntervalConfig struct {
+	DefaultInterval     time.Duration `mapstructure:"default_interval"`
+	MaxRuntime          time.Duration `mapstructure:"max_runtime"`
+	MaxExecutions       int           `mapstructure:"max_executions"`
+	BackoffStrategy     string        `mapstructure:"backoff_strategy"`
+	MaxBackoff          time.Duration `mapstructure:"max_backoff"`
+	ContinueOnError     bool          `mapstructure:"continue_on_error"`
+	SkipEmpty           bool          `mapstructure:"skip_empty"`
+	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+	DaemonMode          bool          `mapstructure:"daemon_mode"`
+	PIDFile             string        `mapstructure:"pid_file"`
+	LogFile             string        `mapstructure:"log_file"`
 }
 
 // DefaultConfig returns the default configuration
@@ -104,6 +120,19 @@ func DefaultConfig() *Config {
 			ConnMaxIdleTime:   5 * time.Minute,
 			MaxConnections:    10,
 			ConnectionTimeout: 30 * time.Second,
+		},
+		Interval: IntervalConfig{
+			DefaultInterval:     1 * time.Hour,
+			MaxRuntime:          24 * time.Hour,
+			MaxExecutions:       1000,
+			BackoffStrategy:     "exponential",
+			MaxBackoff:          30 * time.Minute,
+			ContinueOnError:     true,
+			SkipEmpty:           false,
+			HealthCheckInterval: 5 * time.Minute,
+			DaemonMode:          false,
+			PIDFile:             "/var/run/quakewatch-scraper.pid",
+			LogFile:             "/var/log/quakewatch-scraper.log",
 		},
 	}
 }

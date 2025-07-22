@@ -5,8 +5,12 @@ A Go application for collecting earthquake and fault data from various seismolog
 ## Features
 
 - **Earthquake Data Collection**: Fetch earthquake data from USGS FDSNWS API
+- **Country Filtering**: Filter earthquakes by country or region
 - **Fault Data Collection**: Fetch fault data from EMSC-CSEM API
+- **Interval Scraping**: Run data collection at specified intervals with monitoring
+- **Daemon Mode**: Run in background as a daemon process
 - **JSON Storage**: Save all data to timestamped JSON files
+- **Standard Output**: Output data directly to terminal with `--stdout` flag
 - **Command Line Interface**: Easy-to-use CLI with various collection options
 - **Data Validation**: Built-in data validation and statistics
 - **Cross-platform**: Single binary for Linux, macOS, and Windows
@@ -60,6 +64,9 @@ make build-windows
 
 # Show help
 ./bin/quakewatch-scraper help
+
+# Quick data preview (output to terminal)
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 3
 ```
 
 ### Earthquake Data Collection
@@ -82,6 +89,9 @@ make build-windows
 
 # Collect earthquakes by geographic region
 ./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114
+
+# Collect earthquakes by country
+./bin/quakewatch-scraper earthquakes country --country "Japan" --min-mag 4.0
 ```
 
 ### Fault Data Collection
@@ -93,6 +103,42 @@ make build-windows
 # Update fault data with retry logic
 ./bin/quakewatch-scraper faults update --retries 5 --retry-delay 10s
 ```
+
+### Interval Scraping
+
+The interval scraping feature allows you to run data collection commands at specified intervals with monitoring and error handling.
+
+```bash
+# Collect recent earthquakes every 5 minutes
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m
+
+# Collect significant earthquakes every hour
+./bin/quakewatch-scraper interval earthquakes significant --interval 1h
+
+# Collect country-specific earthquakes every 6 hours
+./bin/quakewatch-scraper interval earthquakes country --country "Japan" --interval 6h
+
+# Run fault collection every 12 hours
+./bin/quakewatch-scraper interval faults collect --interval 12h
+
+# Run in daemon mode (background)
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m --daemon
+
+# Limited runtime with exponential backoff
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --max-runtime 24h \
+  --backoff exponential \
+  --max-backoff 30m \
+  --continue-on-error
+
+# Custom command combination
+./bin/quakewatch-scraper interval custom \
+  --interval 1h \
+  --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31"
+```
+
+For detailed information about interval scraping, see [INTERVAL_README.md](INTERVAL_README.md).
 
 ### Data Management
 
@@ -144,6 +190,44 @@ make build-windows
 
 # Use configuration file
 ./bin/quakewatch-scraper earthquakes recent --config ./configs/config.yaml
+```
+
+### Output to Standard Output
+
+The `--stdout` flag allows you to output data directly to the terminal instead of saving to files. This is useful for:
+
+- **Piping to other tools**: Process data with `jq`, `grep`, or other command-line tools
+- **Real-time processing**: View data immediately without file I/O overhead
+- **Integration with scripts**: Capture output for further processing
+- **Debugging**: Quickly inspect data structure and content
+
+```bash
+# Output recent earthquakes to stdout
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 5
+
+# Output earthquakes by country to stdout
+./bin/quakewatch-scraper earthquakes country --country "Japan" --stdout
+
+# Output earthquakes by magnitude range to stdout
+./bin/quakewatch-scraper earthquakes magnitude --min 4.0 --max 5.0 --stdout
+
+# Output fault data to stdout
+./bin/quakewatch-scraper faults collect --stdout
+
+# Pipe to jq for filtering and formatting
+./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | select(.properties.mag > 4.0)'
+
+# Count earthquakes in a region
+./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114 --stdout | jq '.features | length'
+
+# Extract specific earthquake properties
+./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | {magnitude: .properties.mag, place: .properties.place, time: .properties.time}'
+
+# Save stdout output to a custom file
+./bin/quakewatch-scraper earthquakes recent --stdout > my_earthquakes.json
+
+# Combine with other tools for analysis
+./bin/quakewatch-scraper earthquakes recent --stdout | jq -r '.features[] | "\(.properties.mag) \(.properties.place)"' | sort -n
 ```
 
 ## Configuration
@@ -337,9 +421,6 @@ go test -v ./...
 ```bash
 # Format code
 make fmt
-
-# Lint code (requires golangci-lint)
-make lint
 
 # Generate documentation
 make docs
