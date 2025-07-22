@@ -173,6 +173,119 @@ func (c *EarthquakeCollector) CollectByCountry(country string, startTime, endTim
 	return nil
 }
 
+// CollectRecentData collects recent earthquakes and returns the data without saving
+func (c *EarthquakeCollector) CollectRecentData(limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting recent earthquakes (last hour, limit: %d)...\n", limit)
+
+	earthquakes, err := c.usgsClient.GetRecentEarthquakes(limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch recent earthquakes: %w", err)
+	}
+
+	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
+	return earthquakes, nil
+}
+
+// CollectByTimeRangeData collects earthquakes within a specific time range and returns the data without saving
+func (c *EarthquakeCollector) CollectByTimeRangeData(startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting earthquakes from %s to %s (limit: %d)...\n",
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+		limit)
+
+	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(startTime, endTime, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch earthquakes by time range: %w", err)
+	}
+
+	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
+	return earthquakes, nil
+}
+
+// CollectByMagnitudeData collects earthquakes within a magnitude range and returns the data without saving
+func (c *EarthquakeCollector) CollectByMagnitudeData(minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting earthquakes with magnitude %.1f to %.1f (limit: %d)...\n", minMag, maxMag, limit)
+
+	earthquakes, err := c.usgsClient.GetEarthquakesByMagnitude(minMag, maxMag, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch earthquakes by magnitude: %w", err)
+	}
+
+	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
+	return earthquakes, nil
+}
+
+// CollectSignificantData collects significant earthquakes and returns the data without saving
+func (c *EarthquakeCollector) CollectSignificantData(startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting significant earthquakes (M4.5+) from %s to %s (limit: %d)...\n",
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+		limit)
+
+	earthquakes, err := c.usgsClient.GetSignificantEarthquakes(startTime, endTime, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch significant earthquakes: %w", err)
+	}
+
+	fmt.Printf("Found %d significant earthquakes\n", len(earthquakes.Features))
+	return earthquakes, nil
+}
+
+// CollectByRegionData collects earthquakes within a geographic region and returns the data without saving
+func (c *EarthquakeCollector) CollectByRegionData(minLat, maxLat, minLon, maxLon float64, limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting earthquakes in region (%.2f,%.2f) to (%.2f,%.2f) (limit: %d)...\n",
+		minLat, minLon, maxLat, maxLon, limit)
+
+	earthquakes, err := c.usgsClient.GetEarthquakesByRegion(minLat, maxLat, minLon, maxLon, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch earthquakes by region: %w", err)
+	}
+
+	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
+	return earthquakes, nil
+}
+
+// CollectByCountryData collects earthquakes filtered by country name and returns the data without saving
+func (c *EarthquakeCollector) CollectByCountryData(country string, startTime, endTime time.Time, minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
+	fmt.Printf("Collecting earthquakes in %s from %s to %s (magnitude %.1f-%.1f, limit: %d)...\n",
+		country,
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+		minMag, maxMag, limit)
+
+	// First, fetch earthquakes by time range and magnitude
+	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRangeAndMagnitude(startTime, endTime, minMag, maxMag, limit*2) // Fetch more to account for filtering
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch earthquakes: %w", err)
+	}
+
+	// Filter earthquakes by country
+	var filteredEarthquakes []models.Earthquake
+	for _, eq := range earthquakes.Features {
+		if containsCountry(eq.Properties.Place, country) {
+			filteredEarthquakes = append(filteredEarthquakes, eq)
+		}
+	}
+
+	// Limit the results
+	if len(filteredEarthquakes) > limit {
+		filteredEarthquakes = filteredEarthquakes[:limit]
+	}
+
+	// Create a new response with filtered earthquakes
+	filteredResponse := &models.USGSResponse{
+		Type:     earthquakes.Type,
+		Metadata: earthquakes.Metadata,
+		Features: filteredEarthquakes,
+	}
+
+	// Update metadata count
+	filteredResponse.Metadata.Count = len(filteredEarthquakes)
+
+	fmt.Printf("Found %d earthquakes in %s\n", len(filteredEarthquakes), country)
+	return filteredResponse, nil
+}
+
 // containsCountry checks if the place string contains the specified country
 func containsCountry(place, country string) bool {
 	// Convert both to lowercase for case-insensitive comparison

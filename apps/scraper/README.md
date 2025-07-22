@@ -8,6 +8,7 @@ A Go application for collecting earthquake and fault data from various seismolog
 - **Country Filtering**: Filter earthquakes by country or region
 - **Fault Data Collection**: Fetch fault data from EMSC-CSEM API
 - **JSON Storage**: Save all data to timestamped JSON files
+- **Standard Output**: Output data directly to terminal with `--stdout` flag
 - **Command Line Interface**: Easy-to-use CLI with various collection options
 - **Data Validation**: Built-in data validation and statistics
 - **Cross-platform**: Single binary for Linux, macOS, and Windows
@@ -61,6 +62,9 @@ make build-windows
 
 # Show help
 ./bin/quakewatch-scraper help
+
+# Quick data preview (output to terminal)
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 3
 ```
 
 ### Earthquake Data Collection
@@ -148,6 +152,44 @@ make build-windows
 
 # Use configuration file
 ./bin/quakewatch-scraper earthquakes recent --config ./configs/config.yaml
+```
+
+### Output to Standard Output
+
+The `--stdout` flag allows you to output data directly to the terminal instead of saving to files. This is useful for:
+
+- **Piping to other tools**: Process data with `jq`, `grep`, or other command-line tools
+- **Real-time processing**: View data immediately without file I/O overhead
+- **Integration with scripts**: Capture output for further processing
+- **Debugging**: Quickly inspect data structure and content
+
+```bash
+# Output recent earthquakes to stdout
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 5
+
+# Output earthquakes by country to stdout
+./bin/quakewatch-scraper earthquakes country --country "Japan" --stdout
+
+# Output earthquakes by magnitude range to stdout
+./bin/quakewatch-scraper earthquakes magnitude --min 4.0 --max 5.0 --stdout
+
+# Output fault data to stdout
+./bin/quakewatch-scraper faults collect --stdout
+
+# Pipe to jq for filtering and formatting
+./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | select(.properties.mag > 4.0)'
+
+# Count earthquakes in a region
+./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114 --stdout | jq '.features | length'
+
+# Extract specific earthquake properties
+./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | {magnitude: .properties.mag, place: .properties.place, time: .properties.time}'
+
+# Save stdout output to a custom file
+./bin/quakewatch-scraper earthquakes recent --stdout > my_earthquakes.json
+
+# Combine with other tools for analysis
+./bin/quakewatch-scraper earthquakes recent --stdout | jq -r '.features[] | "\(.properties.mag) \(.properties.place)"' | sort -n
 ```
 
 ## Configuration

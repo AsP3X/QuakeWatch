@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -19,6 +21,13 @@ import (
 type App struct {
 	rootCmd *cobra.Command
 	cfg     *config.Config
+}
+
+// outputToStdout outputs data to stdout in JSON format
+func (a *App) outputToStdout(data interface{}) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(data)
 }
 
 // NewApp creates a new CLI application
@@ -96,6 +105,7 @@ func (a *App) setupFlags() {
 	a.rootCmd.PersistentFlags().String("log-level", "info", "Set log level (error, warn, info, debug)")
 	a.rootCmd.PersistentFlags().StringP("output-dir", "o", "./data", "Output directory for JSON files")
 	a.rootCmd.PersistentFlags().Bool("dry-run", false, "Show what would be done without executing")
+	a.rootCmd.PersistentFlags().Bool("stdout", false, "Output data to stdout instead of saving to file")
 }
 
 func (a *App) Run(args []string) error {
@@ -345,6 +355,7 @@ func (a *App) newConfigCmd() *cobra.Command {
 func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Use configuration values
 	if limit == 0 {
@@ -358,6 +369,14 @@ func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+
+	if stdout {
+		earthquakes, err := collector.CollectRecentData(limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
 
 	return collector.CollectRecent(limit, filename)
 }
@@ -367,6 +386,7 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 	endStr, _ := cmd.Flags().GetString("end")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	startTime, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
@@ -390,6 +410,14 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+
+	if stdout {
+		earthquakes, err := collector.CollectByTimeRangeData(startTime, endTime, limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
 
 	return collector.CollectByTimeRange(startTime, endTime, limit, filename)
 }
@@ -399,6 +427,7 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 	maxMag, _ := cmd.Flags().GetFloat64("max")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Use configuration values
 	if limit == 0 {
@@ -413,6 +442,14 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
+	if stdout {
+		earthquakes, err := collector.CollectByMagnitudeData(minMag, maxMag, limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
+
 	return collector.CollectByMagnitude(minMag, maxMag, limit, filename)
 }
 
@@ -421,6 +458,7 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 	endStr, _ := cmd.Flags().GetString("end")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	startTime, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
@@ -444,6 +482,14 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+
+	if stdout {
+		earthquakes, err := collector.CollectSignificantData(startTime, endTime, limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
 
 	return collector.CollectSignificant(startTime, endTime, limit, filename)
 }
@@ -455,6 +501,7 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 	maxLon, _ := cmd.Flags().GetFloat64("max-lon")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Use configuration values
 	if limit == 0 {
@@ -468,6 +515,14 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+
+	if stdout {
+		earthquakes, err := collector.CollectByRegionData(minLat, maxLat, minLon, maxLon, limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
 
 	return collector.CollectByRegion(minLat, maxLat, minLon, maxLon, limit, filename)
 }
@@ -480,6 +535,7 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 	maxMag, _ := cmd.Flags().GetFloat64("max-mag")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Set default time range if not provided (last 30 days)
 	var startTime, endTime time.Time
@@ -512,16 +568,33 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
+	if stdout {
+		earthquakes, err := collector.CollectByCountryData(country, startTime, endTime, minMag, maxMag, limit)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(earthquakes)
+	}
+
 	return collector.CollectByCountry(country, startTime, endTime, minMag, maxMag, limit, filename)
 }
 
 func (a *App) runCollectFaults(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("filename")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Initialize components with configuration
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
 	collector := collector.NewFaultCollector(emscClient, storage)
+
+	if stdout {
+		faults, err := collector.CollectFaultsData()
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(faults)
+	}
 
 	return collector.CollectFaults(filename)
 }
@@ -530,6 +603,7 @@ func (a *App) runUpdateFaults(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("filename")
 	retries, _ := cmd.Flags().GetInt("retries")
 	retryDelay, _ := cmd.Flags().GetDuration("retry-delay")
+	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	// Use configuration values if not provided
 	if retries == 0 {
@@ -543,6 +617,14 @@ func (a *App) runUpdateFaults(cmd *cobra.Command, args []string) error {
 	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
 	collector := collector.NewFaultCollector(emscClient, storage)
+
+	if stdout {
+		faults, err := collector.UpdateFaultsData(retries, retryDelay)
+		if err != nil {
+			return err
+		}
+		return a.outputToStdout(faults)
+	}
 
 	return collector.UpdateFaults(filename, retries, retryDelay)
 }
