@@ -5,7 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -14,6 +19,7 @@ import (
 	"quakewatch-scraper/internal/api"
 	"quakewatch-scraper/internal/collector"
 	"quakewatch-scraper/internal/config"
+	sched "quakewatch-scraper/internal/scheduler"
 	"quakewatch-scraper/internal/storage"
 )
 
@@ -87,6 +93,9 @@ func (a *App) setupCommands() {
 
 	// Add fault commands
 	a.rootCmd.AddCommand(a.newFaultCmd())
+
+	// Add interval commands
+	a.rootCmd.AddCommand(a.newIntervalCmd())
 
 	// Add utility commands
 	a.rootCmd.AddCommand(a.newValidateCmd())
@@ -1046,5 +1055,438 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	// Show the help after the banner
 	if err := cmd.Help(); err != nil {
 		fmt.Printf("Error showing help: %v\n", err)
+	}
+}
+
+// newIntervalCmd creates the interval command
+func (a *App) newIntervalCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "interval",
+		Short: "Run commands at specified intervals",
+		Long:  `Execute scraping commands at regular intervals with configurable options.`,
+	}
+
+	// Add earthquake interval commands
+	cmd.AddCommand(a.newIntervalEarthquakesCmd())
+
+	// Add fault interval commands
+	cmd.AddCommand(a.newIntervalFaultsCmd())
+
+	// Add custom interval commands
+	cmd.AddCommand(a.newIntervalCustomCmd())
+
+	return cmd
+}
+
+// newIntervalEarthquakesCmd creates the interval earthquakes command
+func (a *App) newIntervalEarthquakesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "earthquakes",
+		Short: "Run earthquake collection at intervals",
+		Long:  `Execute earthquake collection commands at specified intervals.`,
+	}
+
+	// Recent earthquakes interval command
+	recentCmd := &cobra.Command{
+		Use:   "recent",
+		Short: "Collect recent earthquakes at intervals",
+		RunE:  a.runIntervalRecentEarthquakes,
+	}
+	a.addIntervalFlags(recentCmd)
+	recentCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	cmd.AddCommand(recentCmd)
+
+	// Time range earthquakes interval command
+	timeRangeCmd := &cobra.Command{
+		Use:   "time-range",
+		Short: "Collect earthquakes by time range at intervals",
+		RunE:  a.runIntervalTimeRangeEarthquakes,
+	}
+	a.addIntervalFlags(timeRangeCmd)
+	timeRangeCmd.Flags().String("start", "", "Start time (YYYY-MM-DD)")
+	timeRangeCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
+	timeRangeCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	if err := timeRangeCmd.MarkFlagRequired("start"); err != nil {
+		panic(fmt.Sprintf("failed to mark start flag as required: %v", err))
+	}
+	if err := timeRangeCmd.MarkFlagRequired("end"); err != nil {
+		panic(fmt.Sprintf("failed to mark end flag as required: %v", err))
+	}
+	cmd.AddCommand(timeRangeCmd)
+
+	// Magnitude earthquakes interval command
+	magnitudeCmd := &cobra.Command{
+		Use:   "magnitude",
+		Short: "Collect earthquakes by magnitude range at intervals",
+		RunE:  a.runIntervalMagnitudeEarthquakes,
+	}
+	a.addIntervalFlags(magnitudeCmd)
+	magnitudeCmd.Flags().Float64("min", 0.0, "Minimum magnitude")
+	magnitudeCmd.Flags().Float64("max", 10.0, "Maximum magnitude")
+	magnitudeCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	cmd.AddCommand(magnitudeCmd)
+
+	// Significant earthquakes interval command
+	significantCmd := &cobra.Command{
+		Use:   "significant",
+		Short: "Collect significant earthquakes at intervals",
+		RunE:  a.runIntervalSignificantEarthquakes,
+	}
+	a.addIntervalFlags(significantCmd)
+	significantCmd.Flags().String("start", "", "Start time (YYYY-MM-DD)")
+	significantCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
+	significantCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	cmd.AddCommand(significantCmd)
+
+	// Region earthquakes interval command
+	regionCmd := &cobra.Command{
+		Use:   "region",
+		Short: "Collect earthquakes by region at intervals",
+		RunE:  a.runIntervalRegionEarthquakes,
+	}
+	a.addIntervalFlags(regionCmd)
+	regionCmd.Flags().Float64("min-lat", -90.0, "Minimum latitude")
+	regionCmd.Flags().Float64("max-lat", 90.0, "Maximum latitude")
+	regionCmd.Flags().Float64("min-lon", -180.0, "Minimum longitude")
+	regionCmd.Flags().Float64("max-lon", 180.0, "Maximum longitude")
+	regionCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	cmd.AddCommand(regionCmd)
+
+	// Country earthquakes interval command
+	countryCmd := &cobra.Command{
+		Use:   "country",
+		Short: "Collect earthquakes by country at intervals",
+		RunE:  a.runIntervalCountryEarthquakes,
+	}
+	a.addIntervalFlags(countryCmd)
+	countryCmd.Flags().String("country", "", "Country name")
+	countryCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	if err := countryCmd.MarkFlagRequired("country"); err != nil {
+		panic(fmt.Sprintf("failed to mark country flag as required: %v", err))
+	}
+	cmd.AddCommand(countryCmd)
+
+	return cmd
+}
+
+// newIntervalFaultsCmd creates the interval faults command
+func (a *App) newIntervalFaultsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "faults",
+		Short: "Run fault collection at intervals",
+		Long:  `Execute fault collection commands at specified intervals.`,
+	}
+
+	// Collect faults interval command
+	collectCmd := &cobra.Command{
+		Use:   "collect",
+		Short: "Collect fault data at intervals",
+		RunE:  a.runIntervalCollectFaults,
+	}
+	a.addIntervalFlags(collectCmd)
+	cmd.AddCommand(collectCmd)
+
+	// Update faults interval command
+	updateCmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update fault data at intervals",
+		RunE:  a.runIntervalUpdateFaults,
+	}
+	a.addIntervalFlags(updateCmd)
+	cmd.AddCommand(updateCmd)
+
+	return cmd
+}
+
+// newIntervalCustomCmd creates the interval custom command
+func (a *App) newIntervalCustomCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "custom",
+		Short: "Run custom command combinations at intervals",
+		Long:  `Execute custom command combinations at specified intervals.`,
+		RunE:  a.runIntervalCustom,
+	}
+
+	a.addIntervalFlags(cmd)
+	cmd.Flags().StringSlice("commands", []string{}, "Comma-separated list of commands to execute")
+
+	return cmd
+}
+
+// addIntervalFlags adds common interval flags to a command
+func (a *App) addIntervalFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("interval", "i", "1h", "Time interval (e.g., '5m', '1h', '24h')")
+	cmd.Flags().String("max-runtime", "", "Maximum total runtime (e.g., '24h', '7d')")
+	cmd.Flags().Int("max-executions", 0, "Maximum number of executions")
+	cmd.Flags().String("backoff", "exponential", "Backoff strategy ('none', 'linear', 'exponential')")
+	cmd.Flags().String("max-backoff", "30m", "Maximum backoff duration")
+	cmd.Flags().Bool("continue-on-error", true, "Continue running on individual command failures")
+	cmd.Flags().Bool("skip-empty", false, "Skip execution if no new data is found")
+	cmd.Flags().String("health-check-interval", "5m", "Health check interval")
+	cmd.Flags().BoolP("daemon", "d", false, "Run in daemon mode (background)")
+	cmd.Flags().String("pid-file", "", "PID file location")
+	cmd.Flags().String("log-file", "", "Log file location for daemon mode")
+}
+
+// runIntervalRecentEarthquakes runs recent earthquakes collection at intervals
+func (a *App) runIntervalRecentEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "recent"}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalTimeRangeEarthquakes runs time range earthquakes collection at intervals
+func (a *App) runIntervalTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "time-range"}
+	if start, _ := cmd.Flags().GetString("start"); start != "" {
+		cmdArgs = append(cmdArgs, "--start", start)
+	}
+	if end, _ := cmd.Flags().GetString("end"); end != "" {
+		cmdArgs = append(cmdArgs, "--end", end)
+	}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalMagnitudeEarthquakes runs magnitude earthquakes collection at intervals
+func (a *App) runIntervalMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "magnitude"}
+	if min, _ := cmd.Flags().GetFloat64("min"); min > 0 {
+		cmdArgs = append(cmdArgs, "--min", fmt.Sprintf("%f", min))
+	}
+	if max, _ := cmd.Flags().GetFloat64("max"); max < 10.0 {
+		cmdArgs = append(cmdArgs, "--max", fmt.Sprintf("%f", max))
+	}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalSignificantEarthquakes runs significant earthquakes collection at intervals
+func (a *App) runIntervalSignificantEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "significant"}
+	if start, _ := cmd.Flags().GetString("start"); start != "" {
+		cmdArgs = append(cmdArgs, "--start", start)
+	}
+	if end, _ := cmd.Flags().GetString("end"); end != "" {
+		cmdArgs = append(cmdArgs, "--end", end)
+	}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalRegionEarthquakes runs region earthquakes collection at intervals
+func (a *App) runIntervalRegionEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "region"}
+	if minLat, _ := cmd.Flags().GetFloat64("min-lat"); minLat > -90.0 {
+		cmdArgs = append(cmdArgs, "--min-lat", fmt.Sprintf("%f", minLat))
+	}
+	if maxLat, _ := cmd.Flags().GetFloat64("max-lat"); maxLat < 90.0 {
+		cmdArgs = append(cmdArgs, "--max-lat", fmt.Sprintf("%f", maxLat))
+	}
+	if minLon, _ := cmd.Flags().GetFloat64("min-lon"); minLon > -180.0 {
+		cmdArgs = append(cmdArgs, "--min-lon", fmt.Sprintf("%f", minLon))
+	}
+	if maxLon, _ := cmd.Flags().GetFloat64("max-lon"); maxLon < 180.0 {
+		cmdArgs = append(cmdArgs, "--max-lon", fmt.Sprintf("%f", maxLon))
+	}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalCountryEarthquakes runs country earthquakes collection at intervals
+func (a *App) runIntervalCountryEarthquakes(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	// Build command arguments
+	cmdArgs := []string{"earthquakes", "country"}
+	if country, _ := cmd.Flags().GetString("country"); country != "" {
+		cmdArgs = append(cmdArgs, "--country", country)
+	}
+	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalCollectFaults runs fault collection at intervals
+func (a *App) runIntervalCollectFaults(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+	cmdArgs := []string{"faults", "collect"}
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalUpdateFaults runs fault updates at intervals
+func (a *App) runIntervalUpdateFaults(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+	cmdArgs := []string{"faults", "update"}
+	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
+}
+
+// runIntervalCustom runs custom command combinations at intervals
+func (a *App) runIntervalCustom(cmd *cobra.Command, args []string) error {
+	intervalConfig := a.buildIntervalConfig(cmd)
+
+	commands, _ := cmd.Flags().GetStringSlice("commands")
+	if len(commands) == 0 {
+		return fmt.Errorf("no commands specified")
+	}
+
+	// For custom commands, we'll execute them sequentially
+	// This is a simplified implementation - in a full implementation,
+	// you might want to support parallel execution or more complex workflows
+	for _, command := range commands {
+		cmdArgs := strings.Split(command, " ")
+		if err := a.runIntervalCommand(cmd, intervalConfig, cmdArgs); err != nil {
+			return fmt.Errorf("custom command failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// buildIntervalConfig builds the interval configuration from command flags
+func (a *App) buildIntervalConfig(cmd *cobra.Command) *config.IntervalConfig {
+	intervalStr, _ := cmd.Flags().GetString("interval")
+	interval, _ := time.ParseDuration(intervalStr)
+	if interval == 0 {
+		interval = a.cfg.Interval.DefaultInterval
+	}
+
+	maxRuntimeStr, _ := cmd.Flags().GetString("max-runtime")
+	maxRuntime, _ := time.ParseDuration(maxRuntimeStr)
+
+	maxExecutions, _ := cmd.Flags().GetInt("max-executions")
+	if maxExecutions == 0 {
+		maxExecutions = a.cfg.Interval.MaxExecutions
+	}
+
+	backoffStrategy, _ := cmd.Flags().GetString("backoff")
+	maxBackoffStr, _ := cmd.Flags().GetString("max-backoff")
+	maxBackoff, _ := time.ParseDuration(maxBackoffStr)
+	if maxBackoff == 0 {
+		maxBackoff = a.cfg.Interval.MaxBackoff
+	}
+
+	continueOnError, _ := cmd.Flags().GetBool("continue-on-error")
+	skipEmpty, _ := cmd.Flags().GetBool("skip-empty")
+
+	healthCheckIntervalStr, _ := cmd.Flags().GetString("health-check-interval")
+	healthCheckInterval, _ := time.ParseDuration(healthCheckIntervalStr)
+	if healthCheckInterval == 0 {
+		healthCheckInterval = a.cfg.Interval.HealthCheckInterval
+	}
+
+	daemonMode, _ := cmd.Flags().GetBool("daemon")
+	pidFile, _ := cmd.Flags().GetString("pid-file")
+	if pidFile == "" {
+		pidFile = a.cfg.Interval.PIDFile
+	}
+
+	logFile, _ := cmd.Flags().GetString("log-file")
+	if logFile == "" {
+		logFile = a.cfg.Interval.LogFile
+	}
+
+	return &config.IntervalConfig{
+		DefaultInterval:     interval,
+		MaxRuntime:          maxRuntime,
+		MaxExecutions:       maxExecutions,
+		BackoffStrategy:     backoffStrategy,
+		MaxBackoff:          maxBackoff,
+		ContinueOnError:     continueOnError,
+		SkipEmpty:           skipEmpty,
+		HealthCheckInterval: healthCheckInterval,
+		DaemonMode:          daemonMode,
+		PIDFile:             pidFile,
+		LogFile:             logFile,
+	}
+}
+
+// runIntervalCommand runs a command at intervals using the scheduler
+func (a *App) runIntervalCommand(cmd *cobra.Command, intervalConfig *config.IntervalConfig, cmdArgs []string) error {
+	// Create logger
+	logger := log.New(os.Stdout, "[INTERVAL] ", log.LstdFlags)
+
+	// Create internal command executor function
+	internalExecutor := func(ctx context.Context, args []string) error {
+		// Create a new command with the arguments
+		execCmd := exec.CommandContext(ctx, os.Args[0], args...)
+		execCmd.Stdout = os.Stdout
+		execCmd.Stderr = os.Stderr
+		execCmd.Stdin = os.Stdin
+		return execCmd.Run()
+	}
+
+	// Create scheduler with internal executor
+	scheduler := sched.NewIntervalScheduler(intervalConfig, logger)
+
+	// Replace the executor with our internal one
+	executor := sched.NewCommandExecutorWithFunction(logger, internalExecutor)
+	scheduler.SetExecutor(executor)
+
+	// Set up backoff strategy
+	switch intervalConfig.BackoffStrategy {
+	case "none":
+		executor.SetBackoffStrategy(&sched.NoBackoff{})
+	case "linear":
+		executor.SetBackoffStrategy(sched.NewLinearBackoff(5 * time.Second))
+	case "exponential":
+		executor.SetBackoffStrategy(sched.NewExponentialBackoff(5*time.Second, intervalConfig.MaxBackoff))
+	default:
+		executor.SetBackoffStrategy(sched.NewExponentialBackoff(5*time.Second, intervalConfig.MaxBackoff))
+	}
+
+	// Set up signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		logger.Printf("Received shutdown signal, stopping scheduler...")
+		cancel()
+		scheduler.Stop()
+	}()
+
+	// Start the scheduler
+	if intervalConfig.DaemonMode {
+		logger.Printf("Starting interval scheduler in daemon mode")
+		return scheduler.StartDaemon(ctx, "quakewatch-scraper", cmdArgs)
+	} else {
+		logger.Printf("Starting interval scheduler")
+		return scheduler.Start(ctx, "quakewatch-scraper", cmdArgs)
 	}
 }

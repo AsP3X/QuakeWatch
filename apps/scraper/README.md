@@ -7,6 +7,8 @@ A Go application for collecting earthquake and fault data from various seismolog
 - **Earthquake Data Collection**: Fetch earthquake data from USGS FDSNWS API
 - **Country Filtering**: Filter earthquakes by country or region
 - **Fault Data Collection**: Fetch fault data from EMSC-CSEM API
+- **Interval Scraping**: Run data collection at specified intervals with monitoring
+- **Daemon Mode**: Run in background as a daemon process
 - **JSON Storage**: Save all data to timestamped JSON files
 - **Standard Output**: Output data directly to terminal with `--stdout` flag
 - **Command Line Interface**: Easy-to-use CLI with various collection options
@@ -101,6 +103,42 @@ make build-windows
 # Update fault data with retry logic
 ./bin/quakewatch-scraper faults update --retries 5 --retry-delay 10s
 ```
+
+### Interval Scraping
+
+The interval scraping feature allows you to run data collection commands at specified intervals with monitoring and error handling.
+
+```bash
+# Collect recent earthquakes every 5 minutes
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m
+
+# Collect significant earthquakes every hour
+./bin/quakewatch-scraper interval earthquakes significant --interval 1h
+
+# Collect country-specific earthquakes every 6 hours
+./bin/quakewatch-scraper interval earthquakes country --country "Japan" --interval 6h
+
+# Run fault collection every 12 hours
+./bin/quakewatch-scraper interval faults collect --interval 12h
+
+# Run in daemon mode (background)
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m --daemon
+
+# Limited runtime with exponential backoff
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --max-runtime 24h \
+  --backoff exponential \
+  --max-backoff 30m \
+  --continue-on-error
+
+# Custom command combination
+./bin/quakewatch-scraper interval custom \
+  --interval 1h \
+  --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31"
+```
+
+For detailed information about interval scraping, see [INTERVAL_README.md](INTERVAL_README.md).
 
 ### Data Management
 

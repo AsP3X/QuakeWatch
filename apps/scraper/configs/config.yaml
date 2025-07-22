@@ -30,3 +30,15 @@ storage:
     earthquakes_dir: earthquakes
     faults_dir: faults
     output_dir: ./data
+interval:
+    default_interval: 1h
+    max_runtime: 24h
+    max_executions: 1000
+    backoff_strategy: exponential
+    max_backoff: 30m
+    continue_on_error: true
+    skip_empty: false
+    health_check_interval: 5m
+    daemon_mode: false
+    pid_file: /var/run/quakewatch-scraper.pid
+    log_file: /var/log/quakewatch-scraper.log
