@@ -6,7 +6,7 @@ build:
 	go build -o bin/quakewatch-scraper cmd/scraper/main.go
 
 # Build for multiple platforms
-build-all: build-linux build-darwin build-windows
+build-all: build-linux build-darwin
 
 build-linux:
 	GOOS=linux GOARCH=amd64 go build -o bin/quakewatch-scraper-linux-amd64 cmd/scraper/main.go
@@ -14,8 +14,7 @@ build-linux:
 build-darwin:
 	GOOS=darwin GOARCH=amd64 go build -o bin/quakewatch-scraper-darwin-amd64 cmd/scraper/main.go
 
-build-windows:
-	GOOS=windows GOARCH=amd64 go build -o bin/quakewatch-scraper-windows-amd64.exe cmd/scraper/main.go
+
 
 # Clean build artifacts
 clean:

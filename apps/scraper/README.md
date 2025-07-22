@@ -13,7 +13,7 @@ A Go application for collecting earthquake and fault data from various seismolog
 - **Standard Output**: Output data directly to terminal with `--stdout` flag
 - **Command Line Interface**: Easy-to-use CLI with various collection options
 - **Data Validation**: Built-in data validation and statistics
-- **Cross-platform**: Single binary for Linux, macOS, and Windows
+- **Unix Systems**: Single binary for Linux, macOS, and other Unix-like systems
 
 ## Installation
 
@@ -39,16 +39,15 @@ make build
 make setup
 ```
 
-### Cross-platform Builds
+### Unix Platform Builds
 
 ```bash
-# Build for all platforms
+# Build for all Unix platforms
 make build-all
 
 # Or build for specific platform
 make build-linux
 make build-darwin
-make build-windows
 ```
 
 ## Usage

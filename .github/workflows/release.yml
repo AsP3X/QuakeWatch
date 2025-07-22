@@ -72,12 +72,6 @@ jobs:
           - os: darwin
             arch: arm64
             bin_name: quakewatch-scraper-darwin-arm64
-          - os: windows
-            arch: amd64
-            bin_name: quakewatch-scraper-windows-amd64.exe
-          - os: windows
-            arch: arm64
-            bin_name: quakewatch-scraper-windows-arm64.exe
 
     steps:
       - name: Checkout code
