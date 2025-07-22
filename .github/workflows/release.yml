@@ -54,6 +54,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Verify dependencies
+        working-directory: apps/scraper
+        run: go mod verify
+
+      - name: Tidy dependencies
+        working-directory: apps/scraper
+        run: go mod tidy
+
+      - name: Download dependencies
+        working-directory: apps/scraper
+        run: go mod download
+
       - name: Build binary
         working-directory: apps/scraper
         env:
