@@ -209,6 +209,24 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	}
 	cmd.AddCommand(regionCmd)
 
+	// Country command
+	countryCmd := &cobra.Command{
+		Use:   "country",
+		Short: "Collect earthquakes by country",
+		RunE:  a.runCountryEarthquakes,
+	}
+	countryCmd.Flags().String("country", "", "Country name to filter by")
+	countryCmd.Flags().String("start", "", "Start time (YYYY-MM-DD)")
+	countryCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
+	countryCmd.Flags().Float64("min-mag", 0.0, "Minimum magnitude")
+	countryCmd.Flags().Float64("max-mag", 10.0, "Maximum magnitude")
+	countryCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
+	countryCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
+	if err := countryCmd.MarkFlagRequired("country"); err != nil {
+		panic(fmt.Sprintf("failed to mark country flag as required: %v", err))
+	}
+	cmd.AddCommand(countryCmd)
+
 	return cmd
 }
 
@@ -452,6 +470,49 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 	collector := collector.NewEarthquakeCollector(usgsClient, storage)
 
 	return collector.CollectByRegion(minLat, maxLat, minLon, maxLon, limit, filename)
+}
+
+func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
+	country, _ := cmd.Flags().GetString("country")
+	startStr, _ := cmd.Flags().GetString("start")
+	endStr, _ := cmd.Flags().GetString("end")
+	minMag, _ := cmd.Flags().GetFloat64("min-mag")
+	maxMag, _ := cmd.Flags().GetFloat64("max-mag")
+	limit, _ := cmd.Flags().GetInt("limit")
+	filename, _ := cmd.Flags().GetString("filename")
+
+	// Set default time range if not provided (last 30 days)
+	var startTime, endTime time.Time
+	if startStr == "" || endStr == "" {
+		endTime = time.Now()
+		startTime = endTime.AddDate(0, 0, -30) // 30 days ago
+	} else {
+		var err error
+		startTime, err = time.Parse("2006-01-02", startStr)
+		if err != nil {
+			return fmt.Errorf("invalid start time format: %w", err)
+		}
+
+		endTime, err = time.Parse("2006-01-02", endStr)
+		if err != nil {
+			return fmt.Errorf("invalid end time format: %w", err)
+		}
+	}
+
+	// Use configuration values
+	if limit == 0 {
+		limit = a.cfg.Collection.DefaultLimit
+	}
+	if limit > a.cfg.Collection.MaxLimit {
+		limit = a.cfg.Collection.MaxLimit
+	}
+
+	// Initialize components with configuration
+	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
+	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+
+	return collector.CollectByCountry(country, startTime, endTime, minMag, maxMag, limit, filename)
 }
 
 func (a *App) runCollectFaults(cmd *cobra.Command, args []string) error {
@@ -890,7 +951,7 @@ func (a *App) checkDatabaseHealth() error {
 // showBanner displays the application banner when no command is provided
 func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                    🌋 QuakeWatch Scraper 🌋                    ║")
+	fmt.Println("║                  🌋 QuakeWatch Scraper 🌋                    ║")
 	fmt.Println("║                                                              ║")
 	fmt.Println("║  A powerful tool for collecting earthquake and fault data    ║")
 	fmt.Println("║  from various geological sources and APIs.                   ║")

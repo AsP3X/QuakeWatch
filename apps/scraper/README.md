@@ -5,6 +5,7 @@ A Go application for collecting earthquake and fault data from various seismolog
 ## Features
 
 - **Earthquake Data Collection**: Fetch earthquake data from USGS FDSNWS API
+- **Country Filtering**: Filter earthquakes by country or region
 - **Fault Data Collection**: Fetch fault data from EMSC-CSEM API
 - **JSON Storage**: Save all data to timestamped JSON files
 - **Command Line Interface**: Easy-to-use CLI with various collection options
@@ -82,6 +83,9 @@ make build-windows
 
 # Collect earthquakes by geographic region
 ./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114
+
+# Collect earthquakes by country
+./bin/quakewatch-scraper earthquakes country --country "Japan" --min-mag 4.0
 ```
 
 ### Fault Data Collection

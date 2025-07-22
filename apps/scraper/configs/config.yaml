@@ -14,10 +14,10 @@ collection:
 database:
     connection_timeout: 30s
     database: quakewatch
-    enabled: false
-    host: localhost
+    enabled: true
+    host: db
     max_connections: 10
-    password: ""
+    password: postgres
     port: 5432
     ssl_mode: disable
     type: postgres

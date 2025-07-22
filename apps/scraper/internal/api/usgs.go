@@ -124,3 +124,16 @@ func (c *USGSClient) GetEarthquakesByRegion(minLat, maxLat, minLon, maxLon float
 
 	return c.GetEarthquakes(params)
 }
+
+// GetEarthquakesByTimeRangeAndMagnitude fetches earthquakes within a time range and magnitude range
+func (c *USGSClient) GetEarthquakesByTimeRangeAndMagnitude(startTime, endTime time.Time, minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
+	params := map[string]string{
+		"starttime":    startTime.Format("2006-01-02T15:04:05"),
+		"endtime":      endTime.Format("2006-01-02T15:04:05"),
+		"minmagnitude": strconv.FormatFloat(minMag, 'f', 1, 64),
+		"maxmagnitude": strconv.FormatFloat(maxMag, 'f', 1, 64),
+		"limit":        strconv.Itoa(limit),
+	}
+
+	return c.GetEarthquakes(params)
+}
