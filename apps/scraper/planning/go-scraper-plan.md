@@ -33,10 +33,17 @@ quakewatch-scraper/
 │   │   └── emsc.go
 │   ├── models/
 │   │   ├── earthquake.go
-│   │   └── fault.go
+│   │   ├── fault.go
+│   │   └── interval.go
 │   ├── collector/
 │   │   ├── earthquake.go
 │   │   └── fault.go
+│   ├── scheduler/
+│   │   ├── interval.go
+│   │   ├── executor.go
+│   │   ├── backoff.go
+│   │   ├── health.go
+│   │   └── daemon.go
 │   ├── storage/
 │   │   └── json.go
 │   └── utils/
@@ -106,7 +113,19 @@ quakewatch-scraper stats [options]
 quakewatch-scraper list [options]
 ```
 
-**4. System Operations**
+**4. Interval Scraping**
+```bash
+# Run earthquake collection at intervals
+quakewatch-scraper interval earthquakes [command] [options]
+
+# Run fault collection at intervals  
+quakewatch-scraper interval faults [command] [options]
+
+# Run custom command combinations at intervals
+quakewatch-scraper interval custom [options]
+```
+
+**5. System Operations**
 ```bash
 # Check system health
 quakewatch-scraper health [options]
@@ -128,6 +147,21 @@ quakewatch-scraper help [options]
 --output-dir, -o <dir>       # Output directory for JSON files (default: ./data)
 --dry-run                    # Show what would be done without executing
 --help, -h                   # Show help for command
+```
+
+#### Interval-Specific Options
+```bash
+--interval, -i string        # Time interval (e.g., "5m", "1h", "24h")
+--max-runtime string         # Maximum total runtime (e.g., "24h", "7d")
+--max-executions int         # Maximum number of executions
+--backoff string             # Backoff strategy ("none", "linear", "exponential")
+--max-backoff string         # Maximum backoff duration
+--continue-on-error          # Continue running on individual command failures
+--skip-empty                 # Skip execution if no new data is found
+--health-check-interval string # Health check interval
+--daemon, -d                 # Run in daemon mode (background)
+--pid-file string            # PID file location (default: /var/run/quakewatch-scraper.pid)
+--log-file string            # Log file location for daemon mode
 ```
 
 #### Command-Specific Options
@@ -210,6 +244,9 @@ func (a *App) setupCommands() {
     // Add fault commands
     a.rootCmd.AddCommand(newFaultCmd())
     
+    // Add interval commands
+    a.rootCmd.AddCommand(newIntervalCmd())
+    
     // Add utility commands
     a.rootCmd.AddCommand(newValidateCmd())
     a.rootCmd.AddCommand(newStatsCmd())
@@ -231,7 +268,105 @@ func (a *App) Run(args []string) error {
     a.rootCmd.SetArgs(args)
     return a.rootCmd.Execute()
 }
-```
+
+// Interval command implementation
+func newIntervalCmd() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "interval",
+        Short: "Run commands at specified intervals",
+        Long:  `Execute scraping commands at regular intervals with configurable options.`,
+    }
+    
+    cmd.AddCommand(newIntervalEarthquakesCmd())
+    cmd.AddCommand(newIntervalFaultsCmd())
+    cmd.AddCommand(newIntervalCustomCmd())
+    
+    return cmd
+}
+
+func newIntervalEarthquakesCmd() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "earthquakes [command]",
+        Short: "Run earthquake collection at intervals",
+        Long:  `Execute earthquake collection commands at regular intervals.`,
+        RunE:  runIntervalEarthquakes,
+    }
+    
+    // Add interval-specific flags
+    cmd.Flags().StringP("interval", "i", "1h", "Time interval (e.g., '5m', '1h', '24h')")
+    cmd.Flags().String("max-runtime", "", "Maximum total runtime (e.g., '24h', '7d')")
+    cmd.Flags().Int("max-executions", 0, "Maximum number of executions")
+    cmd.Flags().String("backoff", "exponential", "Backoff strategy (none, linear, exponential)")
+    cmd.Flags().String("max-backoff", "30m", "Maximum backoff duration")
+    cmd.Flags().Bool("continue-on-error", true, "Continue running on individual command failures")
+    cmd.Flags().Bool("skip-empty", false, "Skip execution if no new data is found")
+    cmd.Flags().BoolP("daemon", "d", false, "Run in daemon mode (background)")
+    cmd.Flags().String("pid-file", "/var/run/quakewatch-scraper.pid", "PID file location")
+    cmd.Flags().String("log-file", "", "Log file location for daemon mode")
+    
+    return cmd
+}
+
+func newIntervalFaultsCmd() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "faults [command]",
+        Short: "Run fault collection at intervals",
+        Long:  `Execute fault collection commands at regular intervals.`,
+        RunE:  runIntervalFaults,
+    }
+    
+    // Add same interval-specific flags as earthquakes
+    cmd.Flags().StringP("interval", "i", "1h", "Time interval (e.g., '5m', '1h', '24h')")
+    cmd.Flags().String("max-runtime", "", "Maximum total runtime (e.g., '24h', '7d')")
+    cmd.Flags().Int("max-executions", 0, "Maximum number of executions")
+    cmd.Flags().String("backoff", "exponential", "Backoff strategy (none, linear, exponential)")
+    cmd.Flags().String("max-backoff", "30m", "Maximum backoff duration")
+    cmd.Flags().Bool("continue-on-error", true, "Continue running on individual command failures")
+    cmd.Flags().Bool("skip-empty", false, "Skip execution if no new data is found")
+    cmd.Flags().BoolP("daemon", "d", false, "Run in daemon mode (background)")
+    cmd.Flags().String("pid-file", "/var/run/quakewatch-scraper.pid", "PID file location")
+    cmd.Flags().String("log-file", "", "Log file location for daemon mode")
+    
+    return cmd
+}
+
+func newIntervalCustomCmd() *cobra.Command {
+    cmd := &cobra.Command{
+        Use:   "custom",
+        Short: "Run custom command combinations at intervals",
+        Long:  `Execute custom command combinations at regular intervals.`,
+        RunE:  runIntervalCustom,
+    }
+    
+    cmd.Flags().StringP("interval", "i", "1h", "Time interval (e.g., '5m', '1h', '24h')")
+    cmd.Flags().String("commands", "", "Comma-separated list of commands to execute")
+    cmd.Flags().String("max-runtime", "", "Maximum total runtime (e.g., '24h', '7d')")
+    cmd.Flags().Int("max-executions", 0, "Maximum number of executions")
+    cmd.Flags().String("backoff", "exponential", "Backoff strategy (none, linear, exponential)")
+    cmd.Flags().String("max-backoff", "30m", "Maximum backoff duration")
+    cmd.Flags().Bool("continue-on-error", true, "Continue running on individual command failures")
+    cmd.Flags().Bool("skip-empty", false, "Skip execution if no new data is found")
+    cmd.Flags().BoolP("daemon", "d", false, "Run in daemon mode (background)")
+    cmd.Flags().String("pid-file", "/var/run/quakewatch-scraper.pid", "PID file location")
+    cmd.Flags().String("log-file", "", "Log file location for daemon mode")
+    
+    return cmd
+}
+
+func runIntervalEarthquakes(cmd *cobra.Command, args []string) error {
+    // Implementation for interval earthquake collection
+    return nil
+}
+
+func runIntervalFaults(cmd *cobra.Command, args []string) error {
+    // Implementation for interval fault collection
+    return nil
+}
+
+func runIntervalCustom(cmd *cobra.Command, args []string) error {
+    // Implementation for interval custom commands
+    return nil
+}
 
 ### Data Models
 ```go
@@ -338,7 +473,34 @@ type FaultGeometry struct {
     Type        string      `json:"type"`
     Coordinates [][]float64 `json:"coordinates"`
 }
-```
+
+// internal/models/interval.go
+package models
+
+import (
+    "time"
+)
+
+type IntervalConfig struct {
+    DefaultInterval    time.Duration `mapstructure:"default_interval"`
+    MaxRuntime         time.Duration `mapstructure:"max_runtime"`
+    MaxExecutions      int           `mapstructure:"max_executions"`
+    BackoffStrategy    string        `mapstructure:"backoff_strategy"`
+    MaxBackoff         time.Duration `mapstructure:"max_backoff"`
+    ContinueOnError    bool          `mapstructure:"continue_on_error"`
+    SkipEmpty          bool          `mapstructure:"skip_empty"`
+    HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
+    DaemonMode         bool          `mapstructure:"daemon_mode"`
+    PIDFile            string        `mapstructure:"pid_file"`
+    LogFile            string        `mapstructure:"log_file"`
+}
+
+type IntervalMetrics struct {
+    Executions    int64
+    Failures      int64
+    LastExecution time.Time
+    TotalRuntime  time.Duration
+}
 
 ### API Clients
 ```go
@@ -444,6 +606,310 @@ func (c *EMSCClient) GetFaults() (*models.Fault, error) {
     return &faults, nil
 }
 ```
+
+### Scheduler Components
+
+```go
+// internal/scheduler/interval.go
+package scheduler
+
+import (
+    "context"
+    "time"
+    "log"
+    
+    "quakewatch-scraper/internal/config"
+)
+
+type IntervalScheduler struct {
+    config     *config.IntervalConfig
+    executor   *CommandExecutor
+    logger     *log.Logger
+    stopChan   chan struct{}
+    doneChan   chan struct{}
+    daemon     *DaemonManager
+}
+
+func NewIntervalScheduler(config *config.IntervalConfig) *IntervalScheduler {
+    return &IntervalScheduler{
+        config:   config,
+        executor: NewCommandExecutor(),
+        logger:   log.New(os.Stdout, "[SCHEDULER] ", log.LstdFlags),
+        stopChan: make(chan struct{}),
+        doneChan: make(chan struct{}),
+        daemon:   NewDaemonManager(config.PIDFile, config.LogFile),
+    }
+}
+
+func (s *IntervalScheduler) Start(ctx context.Context, command string, args []string) error {
+    ticker := time.NewTicker(s.config.DefaultInterval)
+    defer ticker.Stop()
+    
+    s.logger.Printf("Starting interval scheduler with interval: %v", s.config.DefaultInterval)
+    
+    for {
+        select {
+        case <-ctx.Done():
+            s.logger.Println("Context cancelled, stopping scheduler")
+            return ctx.Err()
+        case <-s.stopChan:
+            s.logger.Println("Stop signal received, stopping scheduler")
+            return nil
+        case <-ticker.C:
+            if err := s.executor.Execute(ctx, command, args); err != nil {
+                s.logger.Printf("Execution failed: %v", err)
+                if !s.config.ContinueOnError {
+                    return err
+                }
+            }
+        }
+    }
+}
+
+func (s *IntervalScheduler) Stop() error {
+    close(s.stopChan)
+    <-s.doneChan
+    return nil
+}
+
+func (s *IntervalScheduler) IsRunning() bool {
+    select {
+    case <-s.stopChan:
+        return false
+    default:
+        return true
+    }
+}
+
+// internal/scheduler/executor.go
+package scheduler
+
+import (
+    "context"
+    "time"
+    "log"
+)
+
+type CommandExecutor struct {
+    app        *cli.App
+    backoff    BackoffStrategy
+    logger     *log.Logger
+}
+
+func NewCommandExecutor() *CommandExecutor {
+    return &CommandExecutor{
+        app:     cli.NewApp(),
+        backoff: NewExponentialBackoff(5*time.Second, 30*time.Minute),
+        logger:  log.New(os.Stdout, "[EXECUTOR] ", log.LstdFlags),
+    }
+}
+
+func (e *CommandExecutor) Execute(ctx context.Context, command string, args []string) error {
+    e.logger.Printf("Executing command: %s %v", command, args)
+    
+    // Execute the command with retry logic
+    return e.ExecuteWithRetry(ctx, command, args)
+}
+
+func (e *CommandExecutor) ExecuteWithRetry(ctx context.Context, command string, args []string) error {
+    maxAttempts := 3
+    for attempt := 1; attempt <= maxAttempts; attempt++ {
+        if err := e.app.Run(append([]string{command}, args...)); err != nil {
+            if attempt == maxAttempts {
+                return err
+            }
+            
+            delay := e.backoff.GetDelay(attempt)
+            e.logger.Printf("Execution failed, retrying in %v (attempt %d/%d)", delay, attempt, maxAttempts)
+            
+            select {
+            case <-ctx.Done():
+                return ctx.Err()
+            case <-time.After(delay):
+                continue
+            }
+        }
+        return nil
+    }
+    return nil
+}
+
+// internal/scheduler/backoff.go
+package scheduler
+
+import (
+    "time"
+    "math"
+)
+
+type BackoffStrategy interface {
+    GetDelay(attempt int) time.Duration
+    Reset()
+}
+
+type NoBackoff struct{}
+
+func (n *NoBackoff) GetDelay(attempt int) time.Duration { return 0 }
+func (n *NoBackoff) Reset() {}
+
+type LinearBackoff struct{ baseDelay time.Duration }
+
+func (l *LinearBackoff) GetDelay(attempt int) time.Duration {
+    return time.Duration(attempt) * l.baseDelay
+}
+
+func (l *LinearBackoff) Reset() {}
+
+type ExponentialBackoff struct{ baseDelay, maxDelay time.Duration }
+
+func (e *ExponentialBackoff) GetDelay(attempt int) time.Duration {
+    delay := time.Duration(float64(e.baseDelay) * math.Pow(2, float64(attempt-1)))
+    if delay > e.maxDelay {
+        delay = e.maxDelay
+    }
+    return delay
+}
+
+func (e *ExponentialBackoff) Reset() {}
+
+func NewExponentialBackoff(baseDelay, maxDelay time.Duration) BackoffStrategy {
+    return &ExponentialBackoff{baseDelay: baseDelay, maxDelay: maxDelay}
+}
+
+// internal/scheduler/daemon.go
+package scheduler
+
+import (
+    "fmt"
+    "os"
+    "syscall"
+    "log"
+)
+
+type DaemonManager struct {
+    pidFile    string
+    logFile    string
+    logger     *log.Logger
+}
+
+func NewDaemonManager(pidFile, logFile string) *DaemonManager {
+    return &DaemonManager{
+        pidFile: pidFile,
+        logFile: logFile,
+        logger:  log.New(os.Stdout, "[DAEMON] ", log.LstdFlags),
+    }
+}
+
+func (d *DaemonManager) Start() error {
+    // Fork and detach from parent process
+    if err := d.fork(); err != nil {
+        return err
+    }
+    
+    // Set up signal handlers
+    d.setupSignalHandlers()
+    
+    // Write PID file
+    if err := d.WritePID(); err != nil {
+        return err
+    }
+    
+    // Set up logging
+    if err := d.SetupLogging(); err != nil {
+        return err
+    }
+    
+    d.logger.Println("Daemon started successfully")
+    return nil
+}
+
+func (d *DaemonManager) Stop() error {
+    if err := d.RemovePID(); err != nil {
+        return err
+    }
+    d.logger.Println("Daemon stopped")
+    return nil
+}
+
+func (d *DaemonManager) IsRunning() bool {
+    if _, err := os.Stat(d.pidFile); os.IsNotExist(err) {
+        return false
+    }
+    
+    pid, err := d.readPID()
+    if err != nil {
+        return false
+    }
+    
+    process, err := os.FindProcess(pid)
+    if err != nil {
+        return false
+    }
+    
+    return process.Signal(syscall.Signal(0)) == nil
+}
+
+func (d *DaemonManager) WritePID() error {
+    pid := os.Getpid()
+    return os.WriteFile(d.pidFile, []byte(fmt.Sprintf("%d", pid)), 0644)
+}
+
+func (d *DaemonManager) RemovePID() error {
+    return os.Remove(d.pidFile)
+}
+
+func (d *DaemonManager) SetupLogging() error {
+    if d.logFile == "" {
+        return nil
+    }
+    
+    file, err := os.OpenFile(d.logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    if err != nil {
+        return err
+    }
+    
+    // Redirect stdout and stderr to log file
+    os.Stdout = file
+    os.Stderr = file
+    
+    return nil
+}
+
+func (d *DaemonManager) fork() error {
+    // Fork the process
+    pid, err := syscall.Fork()
+    if err != nil {
+        return err
+    }
+    
+    if pid > 0 {
+        // Parent process - exit
+        os.Exit(0)
+    }
+    
+    // Child process - create new session
+    if _, err := syscall.Setsid(); err != nil {
+        return err
+    }
+    
+    return nil
+}
+
+func (d *DaemonManager) setupSignalHandlers() {
+    // Set up signal handling for graceful shutdown
+    // Implementation depends on the signal handling library used
+}
+
+func (d *DaemonManager) readPID() (int, error) {
+    data, err := os.ReadFile(d.pidFile)
+    if err != nil {
+        return 0, err
+    }
+    
+    var pid int
+    _, err = fmt.Sscanf(string(data), "%d", &pid)
+    return pid, err
+}
 
 ### Storage Layer
 ```go
@@ -581,6 +1047,19 @@ collection:
   max_limit: 10000
   retry_attempts: 3
   retry_delay: 5s
+
+interval:
+  default_interval: 1h
+  max_runtime: 24h
+  max_executions: 1000
+  backoff_strategy: exponential
+  max_backoff: 30m
+  continue_on_error: true
+  skip_empty: false
+  health_check_interval: 5m
+  daemon_mode: false
+  pid_file: /var/run/quakewatch-scraper.pid
+  log_file: /var/log/quakewatch-scraper.log
 ```
 
 ## Build and Deployment
@@ -712,19 +1191,104 @@ make build
 ./bin/quakewatch-scraper earthquakes recent --limit 100
 ```
 
+### Interval Usage Examples
+```bash
+# Collect recent earthquakes every 5 minutes for 24 hours
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m --max-runtime 24h
+
+# Collect significant earthquakes every hour with exponential backoff
+./bin/quakewatch-scraper interval earthquakes significant \
+  --start "2024-01-01" --end "2024-01-31" \
+  --interval 1h --backoff exponential --max-backoff 30m
+
+# Collect country-specific earthquakes every 6 hours
+./bin/quakewatch-scraper interval earthquakes country \
+  --country "Japan" --interval 6h --max-executions 100
+
+# Custom interval with multiple commands
+./bin/quakewatch-scraper interval custom \
+  --interval 1h \
+  --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31"
+
+# Run in daemon mode (background)
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m --daemon --log-file /var/log/quakewatch-scraper.log
+
+# Daemon mode with custom PID file
+./bin/quakewatch-scraper interval earthquakes country --country "Japan" --interval 1h --daemon --pid-file /tmp/quakewatch-japan.pid
+
+# Collect fault data every 12 hours
+./bin/quakewatch-scraper interval faults collect --interval 12h --continue-on-error
+
+# Health check and monitoring
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m --health-check-interval 1m
+```
+
 ## Future Enhancements
 
-This simplified Go scraper plan provides a solid foundation that can be extended with:
+This comprehensive Go scraper plan provides a solid foundation that can be extended with:
 
 1. **Database Integration**: Add PostgreSQL/MySQL support for persistent storage
 2. **Real-time Monitoring**: Add WebSocket support for real-time data streaming
 3. **Advanced Filtering**: Add more sophisticated query capabilities
 4. **Data Processing**: Add data cleaning, validation, and transformation features
-5. **Scheduling**: Add cron-based scheduling for automated collection
-6. **API Server**: Add HTTP API endpoints for data access
-7. **Metrics and Monitoring**: Add Prometheus metrics and health checks
-8. **Configuration Management**: Add environment-based configuration
-9. **Testing**: Add comprehensive unit and integration tests
-10. **Documentation**: Add API documentation and user guides
+5. **API Server**: Add HTTP API endpoints for data access
+6. **Metrics and Monitoring**: Add Prometheus metrics and health checks
+7. **Configuration Management**: Add environment-based configuration
+8. **Testing**: Add comprehensive unit and integration tests
+9. **Documentation**: Add API documentation and user guides
+10. **Advanced Scheduling**: Add cron-based scheduling as an alternative to interval-based execution
+11. **Distributed Execution**: Add support for running multiple scraper instances
+12. **Data Analytics**: Add built-in data analysis and reporting capabilities
 
-The current plan focuses on simplicity and reliability while providing a clear path for future enhancements. 
+The current plan includes interval-based execution, daemon mode, and comprehensive error handling while maintaining simplicity and reliability.
+
+## Interval Scraping Features
+
+### Core Interval Functionality
+The interval scraping feature enables continuous data collection with the following capabilities:
+
+1. **Flexible Intervals**: Support for various time intervals (minutes, hours, days)
+2. **Runtime Limits**: Configurable maximum runtime and execution count limits
+3. **Error Handling**: Robust error handling with configurable retry strategies
+4. **Backoff Strategies**: Exponential, linear, or no backoff for failed executions
+5. **Daemon Mode**: Background execution with PID file management
+6. **Health Monitoring**: Built-in health checks and monitoring capabilities
+7. **Resource Management**: Memory and disk space monitoring
+8. **Graceful Shutdown**: Proper signal handling for clean termination
+
+### Daemon Mode Features
+- **Process Management**: Fork and detach from parent process
+- **PID File Management**: Create and manage PID files for process tracking
+- **Signal Handling**: Handle SIGTERM, SIGINT, SIGHUP for graceful shutdown
+- **Logging Redirection**: Redirect stdout/stderr to log files
+- **Working Directory**: Set appropriate working directory for daemon
+
+### Error Recovery Strategies
+- **Transient Errors**: API timeouts, network issues (retry with backoff)
+- **Permanent Errors**: Invalid parameters, authentication failures (stop execution)
+- **Resource Errors**: Memory/disk space issues (pause and retry)
+- **Daemon Errors**: PID file conflicts, permission issues, signal handling failures
+
+### Resource Management
+- **Memory Management**: Clear collected data after each execution
+- **Disk Space Management**: Check available space before each execution
+- **API Rate Limiting**: Respect API rate limits across intervals
+- **Log Rotation**: Implement log rotation for long-running daemons
+
+### Security Considerations
+- **API Key Management**: Secure storage and rotation of API keys
+- **File System Security**: Secure file permissions and path validation
+- **Network Security**: TLS certificate validation and secure HTTP headers
+- **Process Security**: Secure PID file permissions and access controls
+
+### Monitoring and Observability
+- **Structured Logging**: Consistent log format with appropriate levels
+- **Metrics Collection**: Execution count, success rate, API response times
+- **Health Checks**: Application health endpoints and dependency checks
+- **Resource Monitoring**: Memory usage, CPU usage, disk I/O patterns
+
+### Deployment Considerations
+- **Container Support**: Docker image optimization and health check endpoints
+- **Systemd Integration**: Service file configuration and restart policies
+- **Kubernetes Support**: Deployment manifests and ConfigMap integration
+- **Multi-Instance Support**: Support for running multiple daemon instances 
