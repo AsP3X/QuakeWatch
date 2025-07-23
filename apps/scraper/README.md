@@ -1,6 +1,6 @@
 # QuakeWatch Data Scraper
 
-A Go application for collecting earthquake and fault data from various seismological sources and saving to JSON files.
+A Go application for collecting earthquake and fault data from various seismological sources and saving to JSON files or PostgreSQL database.
 
 ## Features
 
@@ -10,9 +10,13 @@ A Go application for collecting earthquake and fault data from various seismolog
 - **Interval Scraping**: Run data collection at specified intervals with monitoring
 - **Daemon Mode**: Run in background as a daemon process
 - **JSON Storage**: Save all data to timestamped JSON files
+- **PostgreSQL Storage**: Store data in PostgreSQL database with advanced querying
+- **Smart Collection**: Avoid duplicates with time-based filtering and metadata tracking
 - **Standard Output**: Output data directly to terminal with `--stdout` flag
 - **Command Line Interface**: Easy-to-use CLI with various collection options
 - **Data Validation**: Built-in data validation and statistics
+- **Database Migrations**: Automated database schema management
+- **Health Monitoring**: Comprehensive system health checks
 - **Unix Systems**: Single binary for Linux, macOS, and other Unix-like systems
 
 ## Installation
@@ -21,6 +25,7 @@ A Go application for collecting earthquake and fault data from various seismolog
 
 - Go 1.21 or later
 - Git
+- PostgreSQL (optional, for database storage)
 
 ### Build from Source
 
@@ -48,6 +53,21 @@ make build-all
 # Or build for specific platform
 make build-linux
 make build-darwin
+```
+
+### Database Setup (Optional)
+
+If you want to use PostgreSQL storage:
+
+```bash
+# Setup PostgreSQL with Docker
+make db-setup-docker
+
+# Run database migrations
+make db-migrate-up
+
+# Check migration status
+make db-status
 ```
 
 ## Usage
@@ -91,6 +111,21 @@ make build-darwin
 
 # Collect earthquakes by country
 ./bin/quakewatch-scraper earthquakes country --country "Japan" --min-mag 4.0
+```
+
+### Smart Collection (New Feature)
+
+The smart collection feature prevents duplicate data collection by tracking the last collection time:
+
+```bash
+# Smart collection (avoids duplicates)
+./bin/quakewatch-scraper earthquakes recent --smart --storage postgresql
+
+# Time-based collection (last 3 hours)
+./bin/quakewatch-scraper earthquakes recent --hours-back 3 --storage postgresql
+
+# Smart collection with JSON storage
+./bin/quakewatch-scraper earthquakes recent --smart --storage json
 ```
 
 ### Fault Data Collection
@@ -171,6 +206,26 @@ For detailed information about interval scraping, see [INTERVAL_README.md](INTER
 
 # Show what would be deleted (dry run)
 ./bin/quakewatch-scraper purge --dry-run
+```
+
+### Database Operations (New Feature)
+
+```bash
+# Initialize database (creates tables and indexes)
+./bin/quakewatch-scraper db init
+
+# Check database status
+./bin/quakewatch-scraper db status
+
+# Run migrations
+./bin/quakewatch-scraper db migrate up
+
+# Rollback migrations
+./bin/quakewatch-scraper db migrate down
+
+# Migrate to specific version
+./bin/quakewatch-scraper db migrate to 1
+```
 
 ### Advanced Options
 
@@ -189,6 +244,12 @@ For detailed information about interval scraping, see [INTERVAL_README.md](INTER
 
 # Use configuration file
 ./bin/quakewatch-scraper earthquakes recent --config ./configs/config.yaml
+
+# Use PostgreSQL storage backend
+./bin/quakewatch-scraper earthquakes recent --storage postgresql
+
+# Use smart collection to avoid duplicates
+./bin/quakewatch-scraper earthquakes recent --smart --storage postgresql
 ```
 
 ### Output to Standard Output
@@ -258,6 +319,51 @@ collection:
   max_limit: 10000
   retry_attempts: 3
   retry_delay: 5s
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "quakewatch_user"
+  password: "your_password"
+  name: "quakewatch"
+  ssl_mode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: "5m"
+  conn_max_idle_time: "5m"
+
+interval:
+  default_interval: "1h"
+  max_runtime: "24h"
+  max_executions: 0
+  backoff_strategy: "exponential"
+  max_backoff: "30m"
+  continue_on_error: false
+  skip_empty: false
+  health_check_interval: "5m"
+  daemon_mode: false
+  pid_file: "./quakewatch-scraper.pid"
+  log_file: "./quakewatch-scraper.log"
+```
+
+### Environment Variables
+
+For PostgreSQL storage, you can also use environment variables:
+
+```bash
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=quakewatch_user
+DB_PASSWORD=your_password
+DB_NAME=quakewatch
+DB_SSL_MODE=disable
+
+# Connection Pool Settings (optional)
+DB_MAX_OPEN_CONNS=25
+DB_MAX_IDLE_CONNS=5
+DB_CONN_MAX_LIFETIME=5m
+DB_CONN_MAX_IDLE_TIME=5m
 ```
 
 ## Data Sources
@@ -385,12 +491,29 @@ quakewatch-scraper/
 │   │   ├── earthquake.go       # Earthquake data collector
 │   │   └── fault.go            # Fault data collector
 │   ├── storage/
-│   │   └── json.go             # JSON file storage
+│   │   ├── interface.go        # Storage interface
+│   │   ├── json.go             # JSON file storage
+│   │   ├── postgresql.go       # PostgreSQL storage
+│   │   └── migrate.go          # Database migrations
+│   ├── scheduler/
+│   │   ├── interval.go         # Interval scheduling
+│   │   ├── daemon.go           # Daemon mode
+│   │   ├── backoff.go          # Backoff strategies
+│   │   ├── executor.go         # Command execution
+│   │   ├── health.go           # Health monitoring
+│   │   └── metrics.go          # Metrics collection
+│   ├── config/
+│   │   └── config.go           # Configuration management
 │   └── utils/
 │       └── logger.go           # Logging utilities
 ├── pkg/
 │   └── cli/
 │       └── commands.go         # CLI commands
+├── migrations/
+│   ├── 001_create_initial_schema.up.sql
+│   ├── 001_create_initial_schema.down.sql
+│   ├── 002_create_collection_metadata.up.sql
+│   └── 002_create_collection_metadata.down.sql
 ├── configs/
 │   └── config.yaml             # Configuration file
 ├── data/
@@ -399,7 +522,12 @@ quakewatch-scraper/
 ├── go.mod                      # Go module file
 ├── go.sum                      # Go module checksums
 ├── Makefile                    # Build and development tasks
-└── README.md                   # This file
+├── README.md                   # This file
+├── DATABASE.md                 # Database documentation
+├── SMART_COLLECTION.md         # Smart collection documentation
+├── IMPLEMENTATION_SUMMARY.md   # Implementation summary
+├── RELEASE.md                  # Release guide
+└── IMPLEMENTATION_PLAN.md      # Implementation plan
 ```
 
 ### Running Tests
@@ -436,6 +564,25 @@ make test-earthquakes
 
 # Test fault collection
 make test-faults
+```
+
+### Database Development
+
+```bash
+# Setup database with Docker
+make db-setup-docker
+
+# Run migrations
+make db-migrate-up
+
+# Check migration status
+make db-status
+
+# Stop database
+make db-stop-docker
+
+# Setup environment variables
+make setup-env
 ```
 
 ## Examples
@@ -482,6 +629,19 @@ make test-faults
   --filename california_quakes
 ```
 
+### Smart Collection Examples
+
+```bash
+# Smart collection with PostgreSQL (avoids duplicates)
+./bin/quakewatch-scraper earthquakes recent --smart --storage postgresql
+
+# Time-based collection (last 6 hours)
+./bin/quakewatch-scraper earthquakes recent --hours-back 6 --storage postgresql
+
+# Smart collection with JSON storage
+./bin/quakewatch-scraper earthquakes recent --smart --storage json
+```
+
 ### Monitor System Health
 
 ```bash
@@ -493,6 +653,9 @@ make test-faults
 
 # Show data statistics
 ./bin/quakewatch-scraper stats --type earthquakes
+
+# Check database health
+./bin/quakewatch-scraper health --storage postgresql
 ```
 
 ## Troubleshooting
@@ -512,6 +675,11 @@ make test-faults
    - Use YYYY-MM-DD format for dates
    - Ensure dates are in chronological order
 
+4. **Database Connection Issues**
+   - Verify PostgreSQL is running
+   - Check database credentials
+   - Ensure migrations have been run
+
 ### Debug Mode
 
 ```bash
@@ -525,6 +693,14 @@ make test-faults
 # Run comprehensive health check
 ./bin/quakewatch-scraper health
 ```
+
+## Additional Documentation
+
+- **[DATABASE.md](DATABASE.md)**: Complete PostgreSQL database implementation guide
+- **[SMART_COLLECTION.md](SMART_COLLECTION.md)**: Smart collection feature documentation
+- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)**: Implementation summary and overview
+- **[RELEASE.md](RELEASE.md)**: Release and deployment guide
+- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)**: Detailed implementation plan
 
 ## Contributing
 
@@ -545,10 +721,14 @@ For issues and questions:
 - Create an issue in the repository
 - Check the troubleshooting section
 - Review the configuration options
+- Consult the additional documentation files
 
 ## Roadmap
 
-- [ ] Database integration (PostgreSQL/MySQL)
+- [x] Database integration (PostgreSQL)
+- [x] Smart collection features
+- [x] Database migrations
+- [x] Health monitoring
 - [ ] Real-time monitoring capabilities
 - [ ] Advanced filtering and processing
 - [ ] API server functionality
