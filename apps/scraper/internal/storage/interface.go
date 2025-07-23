@@ -29,6 +29,10 @@ type Storage interface {
 	LogCollection(ctx context.Context, dataType, source string, startTime int64, recordsCollected int, status string, errorMsg string) error
 	GetCollectionLogs(ctx context.Context, dataType string, limit int) ([]CollectionLog, error)
 
+	// Collection tracking for smart collection
+	GetLastCollectionTime(ctx context.Context, dataType string) (int64, error)
+	UpdateLastCollectionTime(ctx context.Context, dataType string, collectionTime int64) error
+
 	// Statistics and metadata
 	GetStatistics(ctx context.Context) (*Statistics, error)
 	GetFileStats(ctx context.Context, dataType string) (map[string]interface{}, error)

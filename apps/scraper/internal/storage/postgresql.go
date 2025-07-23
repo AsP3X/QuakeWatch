@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -61,28 +62,27 @@ func (s *PostgreSQLStorage) SaveEarthquakes(ctx context.Context, earthquakes *mo
 
 	query := `
 		INSERT INTO earthquakes (
-			usgs_id, magnitude, magnitude_type, place, time, updated, url, detail_url,
-			felt_count, cdi, mmi, alert, status, tsunami, significance, network, code,
+			usgs_id, magnitude, magnitude_type, place, time, url, detail_url,
+			felt, cdi, mmi, alert, status, tsunami, sig, net, code,
 			ids, sources, types, nst, dmin, rms, gap, latitude, longitude, depth, title
 		) VALUES (
-			:usgs_id, :magnitude, :magnitude_type, :place, :time, :updated, :url, :detail_url,
-			:felt_count, :cdi, :mmi, :alert, :status, :tsunami, :significance, :network, :code,
+			:usgs_id, :magnitude, :magnitude_type, :place, :time, :url, :detail_url,
+			:felt, :cdi, :mmi, :alert, :status, :tsunami, :sig, :net, :code,
 			:ids, :sources, :types, :nst, :dmin, :rms, :gap, :latitude, :longitude, :depth, :title
 		) ON CONFLICT (usgs_id) DO UPDATE SET
 			magnitude = EXCLUDED.magnitude,
 			magnitude_type = EXCLUDED.magnitude_type,
 			place = EXCLUDED.place,
-			updated = EXCLUDED.updated,
 			url = EXCLUDED.url,
 			detail_url = EXCLUDED.detail_url,
-			felt_count = EXCLUDED.felt_count,
+			felt = EXCLUDED.felt,
 			cdi = EXCLUDED.cdi,
 			mmi = EXCLUDED.mmi,
 			alert = EXCLUDED.alert,
 			status = EXCLUDED.status,
 			tsunami = EXCLUDED.tsunami,
-			significance = EXCLUDED.significance,
-			network = EXCLUDED.network,
+			sig = EXCLUDED.sig,
+			net = EXCLUDED.net,
 			code = EXCLUDED.code,
 			ids = EXCLUDED.ids,
 			sources = EXCLUDED.sources,
@@ -110,26 +110,25 @@ func (s *PostgreSQLStorage) SaveEarthquakes(ctx context.Context, earthquakes *mo
 			latitude = earthquake.Geometry.Coordinates[1]
 		}
 
-		// Convert tsunami int to boolean
-		tsunami := earthquake.Properties.Tsunami > 0
+		// Convert tsunami int to integer (already correct)
+		tsunami := earthquake.Properties.Tsunami
 
 		params := map[string]interface{}{
 			"usgs_id":        earthquake.ID,
 			"magnitude":      earthquake.Properties.Mag,
 			"magnitude_type": earthquake.Properties.MagType,
 			"place":          earthquake.Properties.Place,
-			"time":           earthquake.Properties.GetTime(),
-			"updated":        earthquake.Properties.GetUpdated(),
+			"time":           earthquake.Properties.Time,
 			"url":            earthquake.Properties.URL,
 			"detail_url":     earthquake.Properties.Detail,
-			"felt_count":     earthquake.Properties.Felt,
+			"felt":           earthquake.Properties.Felt,
 			"cdi":            earthquake.Properties.CDI,
 			"mmi":            earthquake.Properties.MMI,
 			"alert":          earthquake.Properties.Alert,
 			"status":         earthquake.Properties.Status,
 			"tsunami":        tsunami,
-			"significance":   earthquake.Properties.Sig,
-			"network":        earthquake.Properties.Net,
+			"sig":            earthquake.Properties.Sig,
+			"net":            earthquake.Properties.Net,
 			"code":           earthquake.Properties.Code,
 			"ids":            earthquake.Properties.IDs,
 			"sources":        earthquake.Properties.Sources,
@@ -415,20 +414,20 @@ func (s *PostgreSQLStorage) LoadFaults(ctx context.Context, limit int, offset in
 func (s *PostgreSQLStorage) LogCollection(ctx context.Context, dataType, source string, startTime int64, recordsCollected int, status string, errorMsg string) error {
 	query := `
 		INSERT INTO collection_logs (
-			data_type, source, start_time, end_time, records_collected, status, error_message
+			data_type, source, start_time, end_time, records_collected, status, error_message, created_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7
+			$1, $2, $3, $4, $5, $6, $7, $8
 		)
 	`
 
-	startTimeObj := time.Unix(startTime/1000, 0)
-	var endTimeObj *time.Time
+	var endTime *int64
 	if status == "completed" || status == "failed" {
-		now := time.Now()
-		endTimeObj = &now
+		now := time.Now().UnixMilli()
+		endTime = &now
 	}
 
-	_, err := s.db.ExecContext(ctx, query, dataType, source, startTimeObj, endTimeObj, recordsCollected, status, errorMsg)
+	createdAt := time.Now().UnixMilli()
+	_, err := s.db.ExecContext(ctx, query, dataType, source, startTime, endTime, recordsCollected, status, errorMsg, createdAt)
 	if err != nil {
 		return fmt.Errorf("failed to log collection: %w", err)
 	}
@@ -520,6 +519,45 @@ func (s *PostgreSQLStorage) GetCollectionLogs(ctx context.Context, dataType stri
 func (s *PostgreSQLStorage) GetFileStats(ctx context.Context, dataType string) (map[string]interface{}, error) {
 	// TODO: Implement
 	return nil, fmt.Errorf("not implemented")
+}
+
+// GetLastCollectionTime retrieves the last collection time for a data type
+func (s *PostgreSQLStorage) GetLastCollectionTime(ctx context.Context, dataType string) (int64, error) {
+	query := `
+		SELECT last_collection_time 
+		FROM collection_metadata 
+		WHERE data_type = $1
+	`
+
+	var lastTime int64
+	err := s.db.GetContext(ctx, &lastTime, query, dataType)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Return a default time if no record exists (24 hours ago)
+			return time.Now().Add(-24 * time.Hour).Unix(), nil
+		}
+		return 0, fmt.Errorf("failed to get last collection time: %w", err)
+	}
+
+	return lastTime, nil
+}
+
+// UpdateLastCollectionTime updates the last collection time for a data type
+func (s *PostgreSQLStorage) UpdateLastCollectionTime(ctx context.Context, dataType string, collectionTime int64) error {
+	query := `
+		INSERT INTO collection_metadata (data_type, last_collection_time, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (data_type) DO UPDATE SET
+			last_collection_time = EXCLUDED.last_collection_time,
+			updated_at = NOW()
+	`
+
+	_, err := s.db.ExecContext(ctx, query, dataType, collectionTime)
+	if err != nil {
+		return fmt.Errorf("failed to update last collection time: %w", err)
+	}
+
+	return nil
 }
 
 func (s *PostgreSQLStorage) PurgeAll(ctx context.Context) error {

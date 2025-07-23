@@ -146,6 +146,9 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 	}
 	recentCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
 	recentCmd.Flags().StringP("filename", "f", "", "Custom filename (without extension)")
+	recentCmd.Flags().Bool("smart", false, "Use smart collection to avoid duplicates")
+	recentCmd.Flags().String("storage", "json", "Storage backend (json, postgresql)")
+	recentCmd.Flags().Int("hours-back", 1, "Number of hours to look back")
 	cmd.AddCommand(recentCmd)
 
 	// Time range command
@@ -363,10 +366,11 @@ func (a *App) newConfigCmd() *cobra.Command {
 // Helper methods for command execution
 func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
-	filename, _ := cmd.Flags().GetString("filename")
 	stdout, _ := cmd.Flags().GetBool("stdout")
+	smart, _ := cmd.Flags().GetBool("smart")
+	storageType, _ := cmd.Flags().GetString("storage")
+	hoursBack, _ := cmd.Flags().GetInt("hours-back")
 
-	// Use configuration values
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -374,10 +378,27 @@ func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	var store storage.Storage
+	if storageType == "postgresql" {
+		dbConfig := config.NewDatabaseConfig()
+		pgStore, err := storage.NewPostgreSQLStorage(dbConfig)
+		if err != nil {
+			return fmt.Errorf("failed to initialize PostgreSQL storage: %w", err)
+		}
+		store = pgStore
+		defer store.Close()
+	} else {
+		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		store = jsonStore
+	}
+
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, nil)
+	ctx := context.Background()
+
+	if smart {
+		return collector.CollectRecentEarthquakesSmart(ctx, store)
+	}
 
 	if stdout {
 		earthquakes, err := collector.CollectRecentData(limit)
@@ -387,7 +408,19 @@ func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectRecent(limit, filename)
+	if hoursBack > 1 {
+		earthquakes, err := collector.CollectRecentEarthquakes(ctx, hoursBack)
+		if err != nil {
+			return err
+		}
+		return store.SaveEarthquakes(ctx, earthquakes)
+	}
+
+	earthquakes, err := collector.CollectRecentData(limit)
+	if err != nil {
+		return err
+	}
+	return store.SaveEarthquakes(ctx, earthquakes)
 }
 
 func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
@@ -407,7 +440,6 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid end time format: %w", err)
 	}
 
-	// Use configuration values
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -415,10 +447,10 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	ctx := context.Background()
 
 	if stdout {
 		earthquakes, err := collector.CollectByTimeRangeData(startTime, endTime, limit)
@@ -428,7 +460,7 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectByTimeRange(startTime, endTime, limit, filename)
+	return collector.CollectByTimeRange(ctx, startTime, endTime, limit, filename)
 }
 
 func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
@@ -438,7 +470,6 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("filename")
 	stdout, _ := cmd.Flags().GetBool("stdout")
 
-	// Use configuration values
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -446,10 +477,10 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	ctx := context.Background()
 
 	if stdout {
 		earthquakes, err := collector.CollectByMagnitudeData(minMag, maxMag, limit)
@@ -459,7 +490,7 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectByMagnitude(minMag, maxMag, limit, filename)
+	return collector.CollectByMagnitude(ctx, minMag, maxMag, limit, filename)
 }
 
 func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error {
@@ -479,7 +510,6 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 		return fmt.Errorf("invalid end time format: %w", err)
 	}
 
-	// Use configuration values
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -487,10 +517,10 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	ctx := context.Background()
 
 	if stdout {
 		earthquakes, err := collector.CollectSignificantData(startTime, endTime, limit)
@@ -500,7 +530,7 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectSignificant(startTime, endTime, limit, filename)
+	return collector.CollectSignificant(ctx, startTime, endTime, limit, filename)
 }
 
 func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
@@ -512,7 +542,6 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 	filename, _ := cmd.Flags().GetString("filename")
 	stdout, _ := cmd.Flags().GetBool("stdout")
 
-	// Use configuration values
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -520,10 +549,10 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	ctx := context.Background()
 
 	if stdout {
 		earthquakes, err := collector.CollectByRegionData(minLat, maxLat, minLon, maxLon, limit)
@@ -533,38 +562,29 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectByRegion(minLat, maxLat, minLon, maxLon, limit, filename)
+	return collector.CollectByRegion(ctx, minLat, maxLat, minLon, maxLon, limit, filename)
 }
 
 func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 	country, _ := cmd.Flags().GetString("country")
 	startStr, _ := cmd.Flags().GetString("start")
 	endStr, _ := cmd.Flags().GetString("end")
-	minMag, _ := cmd.Flags().GetFloat64("min-mag")
-	maxMag, _ := cmd.Flags().GetFloat64("max-mag")
+	minMag, _ := cmd.Flags().GetFloat64("min")
+	maxMag, _ := cmd.Flags().GetFloat64("max")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
 	stdout, _ := cmd.Flags().GetBool("stdout")
 
-	// Set default time range if not provided (last 30 days)
-	var startTime, endTime time.Time
-	if startStr == "" || endStr == "" {
-		endTime = time.Now()
-		startTime = endTime.AddDate(0, 0, -30) // 30 days ago
-	} else {
-		var err error
-		startTime, err = time.Parse("2006-01-02", startStr)
-		if err != nil {
-			return fmt.Errorf("invalid start time format: %w", err)
-		}
-
-		endTime, err = time.Parse("2006-01-02", endStr)
-		if err != nil {
-			return fmt.Errorf("invalid end time format: %w", err)
-		}
+	startTime, err := time.Parse("2006-01-02", startStr)
+	if err != nil {
+		return fmt.Errorf("invalid start time format: %w", err)
 	}
 
-	// Use configuration values
+	endTime, err := time.Parse("2006-01-02", endStr)
+	if err != nil {
+		return fmt.Errorf("invalid end time format: %w", err)
+	}
+
 	if limit == 0 {
 		limit = a.cfg.Collection.DefaultLimit
 	}
@@ -572,10 +592,10 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, storage)
+	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	ctx := context.Background()
 
 	if stdout {
 		earthquakes, err := collector.CollectByCountryData(country, startTime, endTime, minMag, maxMag, limit)
@@ -585,72 +605,71 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 		return a.outputToStdout(earthquakes)
 	}
 
-	return collector.CollectByCountry(country, startTime, endTime, minMag, maxMag, limit, filename)
+	return collector.CollectByCountry(ctx, country, startTime, endTime, minMag, maxMag, limit, filename)
 }
 
 func (a *App) runCollectFaults(cmd *cobra.Command, args []string) error {
-	filename, _ := cmd.Flags().GetString("filename")
-	stdout, _ := cmd.Flags().GetBool("stdout")
-
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
-	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
-	collector := collector.NewFaultCollector(emscClient, storage)
-
-	if stdout {
-		faults, err := collector.CollectFaultsData()
+	storageType, _ := cmd.Flags().GetString("storage")
+	var store storage.Storage
+	if storageType == "postgresql" {
+		dbConfig := config.NewDatabaseConfig()
+		pgStore, err := storage.NewPostgreSQLStorage(dbConfig)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize PostgreSQL storage: %w", err)
 		}
-		return a.outputToStdout(faults)
+		store = pgStore
+		defer store.Close()
+	} else {
+		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		store = jsonStore
 	}
 
-	return collector.CollectFaults(filename)
+	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
+	collector := collector.NewFaultCollector(emscClient, store)
+	ctx := context.Background()
+
+	return collector.CollectFaults(ctx)
 }
 
 func (a *App) runUpdateFaults(cmd *cobra.Command, args []string) error {
-	filename, _ := cmd.Flags().GetString("filename")
-	retries, _ := cmd.Flags().GetInt("retries")
+	storageType, _ := cmd.Flags().GetString("storage")
+	maxRetries, _ := cmd.Flags().GetInt("retries")
 	retryDelay, _ := cmd.Flags().GetDuration("retry-delay")
-	stdout, _ := cmd.Flags().GetBool("stdout")
-
-	// Use configuration values if not provided
-	if retries == 0 {
-		retries = a.cfg.Collection.RetryAttempts
-	}
-	if retryDelay == 0 {
-		retryDelay = a.cfg.Collection.RetryDelay
-	}
-
-	// Initialize components with configuration
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
-	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
-	collector := collector.NewFaultCollector(emscClient, storage)
-
-	if stdout {
-		faults, err := collector.UpdateFaultsData(retries, retryDelay)
+	var store storage.Storage
+	if storageType == "postgresql" {
+		dbConfig := config.NewDatabaseConfig()
+		pgStore, err := storage.NewPostgreSQLStorage(dbConfig)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to initialize PostgreSQL storage: %w", err)
 		}
-		return a.outputToStdout(faults)
+		store = pgStore
+		defer store.Close()
+	} else {
+		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		store = jsonStore
 	}
 
-	return collector.UpdateFaults(filename, retries, retryDelay)
+	emscClient := api.NewEMSCClient(a.cfg.API.EMSC.BaseURL, a.cfg.API.EMSC.Timeout)
+	collector := collector.NewFaultCollector(emscClient, store)
+	ctx := context.Background()
+
+	return collector.UpdateFaults(ctx, maxRetries, retryDelay)
 }
 
 func (a *App) runValidate(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	ctx := context.Background()
 
 	if file != "" {
 		// Validate specific file
-		stats, err := storage.GetFileStats(dataType, file)
+		stats, err := store.GetFileStats(ctx, dataType)
 		if err != nil {
 			return fmt.Errorf("failed to validate file: %w", err)
 		}
-		fmt.Printf("File validation successful: %+v\n", stats)
+		fmt.Printf("Stats for %s: %+v\n", file, stats)
 		return nil
 	}
 
@@ -658,34 +677,34 @@ func (a *App) runValidate(cmd *cobra.Command, args []string) error {
 		fmt.Println("Validating all data files:")
 
 		// Validate earthquake files
-		earthquakeFiles, err := storage.ListFiles("earthquakes")
+		earthquakeFiles, err := store.ListFiles("earthquakes")
 		if err != nil {
 			fmt.Printf("Error listing earthquake files: %v\n", err)
 		} else {
 			fmt.Println("Earthquakes:")
 			for _, filename := range earthquakeFiles {
-				stats, err := storage.GetFileStats("earthquakes", filename)
+				stats, err := store.GetFileStats(ctx, "earthquakes")
 				if err != nil {
 					fmt.Printf("  ✗ %s: %v\n", filename, err)
-					continue
+				} else {
+					fmt.Printf("  ✓ %s: %+v\n", filename, stats)
 				}
-				fmt.Printf("  ✓ %s: %d records\n", filename, stats["count"])
 			}
 		}
 
 		// Validate fault files
-		faultFiles, err := storage.ListFiles("faults")
+		faultFiles, err := store.ListFiles("faults")
 		if err != nil {
 			fmt.Printf("Error listing fault files: %v\n", err)
 		} else {
 			fmt.Println("Faults:")
 			for _, filename := range faultFiles {
-				stats, err := storage.GetFileStats("faults", filename)
+				stats, err := store.GetFileStats(ctx, "faults")
 				if err != nil {
 					fmt.Printf("  ✗ %s: %v\n", filename, err)
-					continue
+				} else {
+					fmt.Printf("  ✓ %s: %+v\n", filename, stats)
 				}
-				fmt.Printf("  ✓ %s: %d records\n", filename, stats["count"])
 			}
 		}
 
@@ -693,18 +712,18 @@ func (a *App) runValidate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate specific type
-	files, err := storage.ListFiles(dataType)
+	files, err := store.ListFiles(dataType)
 	if err != nil {
 		return fmt.Errorf("failed to list files: %w", err)
 	}
 
 	for _, filename := range files {
-		stats, err := storage.GetFileStats(dataType, filename)
+		stats, err := store.GetFileStats(ctx, dataType)
 		if err != nil {
 			fmt.Printf("Failed to validate %s: %v\n", filename, err)
-			continue
+		} else {
+			fmt.Printf("Validated %s: %+v\n", filename, stats)
 		}
-		fmt.Printf("✓ %s: %d records\n", filename, stats["count"])
 	}
 
 	return nil
@@ -714,18 +733,16 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	ctx := context.Background()
 
 	if file != "" {
 		// Show stats for specific file
-		stats, err := storage.GetFileStats(dataType, file)
+		stats, err := store.GetFileStats(ctx, dataType)
 		if err != nil {
 			return fmt.Errorf("failed to get file stats: %w", err)
 		}
-		fmt.Printf("File Statistics:\n")
-		for key, value := range stats {
-			fmt.Printf("  %s: %v\n", key, value)
-		}
+		fmt.Printf("Stats for %s: %+v\n", file, stats)
 		return nil
 	}
 
@@ -733,40 +750,42 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 		fmt.Println("Statistics for all data:")
 
 		// Show earthquake stats
-		earthquakeFiles, err := storage.ListFiles("earthquakes")
+		earthquakeFiles, err := store.ListFiles("earthquakes")
 		if err != nil {
 			fmt.Printf("  Error listing earthquake files: %v\n", err)
 		} else {
 			fmt.Printf("  Earthquake files: %d\n", len(earthquakeFiles))
 			totalEarthquakeRecords := 0
 			for _, filename := range earthquakeFiles {
-				stats, err := storage.GetFileStats("earthquakes", filename)
+				stats, err := store.GetFileStats(ctx, "earthquakes")
 				if err != nil {
 					fmt.Printf("    Failed to get stats for %s: %v\n", filename, err)
-					continue
-				}
-				if count, ok := stats["count"].(int); ok {
-					totalEarthquakeRecords += count
+				} else {
+					fmt.Printf("    %s: %+v\n", filename, stats)
+					if count, ok := stats["count"].(int); ok {
+						totalEarthquakeRecords += count
+					}
 				}
 			}
 			fmt.Printf("  Total earthquake records: %d\n", totalEarthquakeRecords)
 		}
 
 		// Show fault stats
-		faultFiles, err := storage.ListFiles("faults")
+		faultFiles, err := store.ListFiles("faults")
 		if err != nil {
 			fmt.Printf("  Error listing fault files: %v\n", err)
 		} else {
 			fmt.Printf("  Fault files: %d\n", len(faultFiles))
 			totalFaultRecords := 0
 			for _, filename := range faultFiles {
-				stats, err := storage.GetFileStats("faults", filename)
+				stats, err := store.GetFileStats(ctx, "faults")
 				if err != nil {
 					fmt.Printf("    Failed to get stats for %s: %v\n", filename, err)
-					continue
-				}
-				if count, ok := stats["count"].(int); ok {
-					totalFaultRecords += count
+				} else {
+					fmt.Printf("    %s: %+v\n", filename, stats)
+					if count, ok := stats["count"].(int); ok {
+						totalFaultRecords += count
+					}
 				}
 			}
 			fmt.Printf("  Total fault records: %d\n", totalFaultRecords)
@@ -776,26 +795,23 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show stats for specific type
-	files, err := storage.ListFiles(dataType)
+	files, err := store.ListFiles(dataType)
 	if err != nil {
 		return fmt.Errorf("failed to list files: %w", err)
 	}
-
-	fmt.Printf("Statistics for %s data:\n", dataType)
-	fmt.Printf("  Total files: %d\n", len(files))
-
 	totalRecords := 0
 	for _, filename := range files {
-		stats, err := storage.GetFileStats(dataType, filename)
+		stats, err := store.GetFileStats(ctx, dataType)
 		if err != nil {
 			fmt.Printf("  Failed to get stats for %s: %v\n", filename, err)
-			continue
-		}
-		if count, ok := stats["count"].(int); ok {
-			totalRecords += count
+		} else {
+			fmt.Printf("  %s: %+v\n", filename, stats)
+			if count, ok := stats["count"].(int); ok {
+				totalRecords += count
+			}
 		}
 	}
-	fmt.Printf("  Total records: %d\n", totalRecords)
+	fmt.Printf("Total records for %s: %d\n", dataType, totalRecords)
 
 	return nil
 }
@@ -803,12 +819,12 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 func (a *App) runList(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
 
 	if dataType == "all" {
 		fmt.Println("Available data files:")
 		fmt.Println("Earthquakes:")
-		earthquakeFiles, err := storage.ListFiles("earthquakes")
+		earthquakeFiles, err := store.ListFiles("earthquakes")
 		if err != nil {
 			fmt.Printf("  Error listing earthquake files: %v\n", err)
 		} else {
@@ -818,7 +834,7 @@ func (a *App) runList(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Println("Faults:")
-		faultFiles, err := storage.ListFiles("faults")
+		faultFiles, err := store.ListFiles("faults")
 		if err != nil {
 			fmt.Printf("  Error listing fault files: %v\n", err)
 		} else {
@@ -827,7 +843,7 @@ func (a *App) runList(cmd *cobra.Command, args []string) error {
 			}
 		}
 	} else {
-		files, err := storage.ListFiles(dataType)
+		files, err := store.ListFiles(dataType)
 		if err != nil {
 			return fmt.Errorf("failed to list files: %w", err)
 		}
@@ -846,13 +862,14 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	ctx := context.Background()
 
 	if dryRun {
 		fmt.Println("DRY RUN - Files that would be deleted:")
 
 		if dataType == "all" || dataType == "earthquakes" {
-			earthquakeFiles, err := storage.ListFiles("earthquakes")
+			earthquakeFiles, err := store.ListFiles("earthquakes")
 			if err != nil {
 				fmt.Printf("  Error listing earthquake files: %v\n", err)
 			} else {
@@ -864,7 +881,7 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 		}
 
 		if dataType == "all" || dataType == "faults" {
-			faultFiles, err := storage.ListFiles("faults")
+			faultFiles, err := store.ListFiles("faults")
 			if err != nil {
 				fmt.Printf("  Error listing fault files: %v\n", err)
 			} else {
@@ -884,7 +901,7 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 	var totalFiles int
 
 	if dataType == "all" || dataType == "earthquakes" {
-		earthquakeFiles, err := storage.ListFiles("earthquakes")
+		earthquakeFiles, err := store.ListFiles("earthquakes")
 		if err != nil {
 			fmt.Printf("  Error listing earthquake files: %v\n", err)
 		} else {
@@ -894,7 +911,7 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 	}
 
 	if dataType == "all" || dataType == "faults" {
-		faultFiles, err := storage.ListFiles("faults")
+		faultFiles, err := store.ListFiles("faults")
 		if err != nil {
 			fmt.Printf("  Error listing fault files: %v\n", err)
 		} else {
@@ -925,12 +942,12 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 
 	// Perform the deletion
 	if dataType == "all" {
-		if err := storage.PurgeAll(); err != nil {
+		if err := store.PurgeAll(ctx); err != nil {
 			return fmt.Errorf("failed to purge all files: %w", err)
 		}
 		fmt.Printf("Successfully deleted %d files.\n", totalFiles)
 	} else {
-		if err := storage.PurgeByType(dataType); err != nil {
+		if err := store.PurgeByType(ctx, dataType); err != nil {
 			return fmt.Errorf("failed to purge %s files: %w", dataType, err)
 		}
 		fmt.Printf("Successfully deleted %s files.\n", dataType)
@@ -961,8 +978,8 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check storage
-	storage := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
-	_, err = storage.ListFiles("earthquakes")
+	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	_, err = store.ListFiles("earthquakes")
 	if err != nil {
 		fmt.Printf("  ✗ Storage: %v\n", err)
 	} else {
