@@ -1247,6 +1247,9 @@ func (a *App) addIntervalFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("daemon", "d", false, "Run in daemon mode (background)")
 	cmd.Flags().String("pid-file", "", "PID file location")
 	cmd.Flags().String("log-file", "", "Log file location for daemon mode")
+	cmd.Flags().String("storage", "json", "Storage backend (json, postgresql)")
+	cmd.Flags().Bool("smart", false, "Use smart collection to avoid duplicates")
+	cmd.Flags().Int("hours-back", 1, "Number of hours to look back")
 }
 
 // runIntervalRecentEarthquakes runs recent earthquakes collection at intervals
@@ -1257,6 +1260,15 @@ func (a *App) runIntervalRecentEarthquakes(cmd *cobra.Command, args []string) er
 	cmdArgs := []string{"earthquakes", "recent"}
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
+	if smart, _ := cmd.Flags().GetBool("smart"); smart {
+		cmdArgs = append(cmdArgs, "--smart")
+	}
+	if hoursBack, _ := cmd.Flags().GetInt("hours-back"); hoursBack > 0 {
+		cmdArgs = append(cmdArgs, "--hours-back", fmt.Sprintf("%d", hoursBack))
 	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
@@ -1277,6 +1289,9 @@ func (a *App) runIntervalTimeRangeEarthquakes(cmd *cobra.Command, args []string)
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
 	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
@@ -1296,6 +1311,9 @@ func (a *App) runIntervalMagnitudeEarthquakes(cmd *cobra.Command, args []string)
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
 	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
@@ -1314,6 +1332,9 @@ func (a *App) runIntervalSignificantEarthquakes(cmd *cobra.Command, args []strin
 	}
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
+	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
 	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
@@ -1340,6 +1361,9 @@ func (a *App) runIntervalRegionEarthquakes(cmd *cobra.Command, args []string) er
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
 	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
@@ -1356,6 +1380,9 @@ func (a *App) runIntervalCountryEarthquakes(cmd *cobra.Command, args []string) e
 	if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
 		cmdArgs = append(cmdArgs, "--limit", fmt.Sprintf("%d", limit))
 	}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
@@ -1364,6 +1391,9 @@ func (a *App) runIntervalCountryEarthquakes(cmd *cobra.Command, args []string) e
 func (a *App) runIntervalCollectFaults(cmd *cobra.Command, args []string) error {
 	intervalConfig := a.buildIntervalConfig(cmd)
 	cmdArgs := []string{"faults", "collect"}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
 
@@ -1371,6 +1401,9 @@ func (a *App) runIntervalCollectFaults(cmd *cobra.Command, args []string) error 
 func (a *App) runIntervalUpdateFaults(cmd *cobra.Command, args []string) error {
 	intervalConfig := a.buildIntervalConfig(cmd)
 	cmdArgs := []string{"faults", "update"}
+	if storage, _ := cmd.Flags().GetString("storage"); storage != "" {
+		cmdArgs = append(cmdArgs, "--storage", storage)
+	}
 	return a.runIntervalCommand(cmd, intervalConfig, cmdArgs)
 }
 

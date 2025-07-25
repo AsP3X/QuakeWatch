@@ -1,25 +1,36 @@
 # QuakeWatch Data Scraper
 
-A Go application for collecting earthquake and fault data from various seismological sources and saving to JSON files or PostgreSQL database.
+A powerful Go application for collecting earthquake and fault data from various seismological sources with advanced interval scraping capabilities and PostgreSQL database storage.
 
-## Features
+## 🚀 Key Features
 
-- **Earthquake Data Collection**: Fetch earthquake data from USGS FDSNWS API
-- **Country Filtering**: Filter earthquakes by country or region
-- **Fault Data Collection**: Fetch fault data from EMSC-CSEM API
-- **Interval Scraping**: Run data collection at specified intervals with monitoring
-- **Daemon Mode**: Run in background as a daemon process
-- **JSON Storage**: Save all data to timestamped JSON files
-- **PostgreSQL Storage**: Store data in PostgreSQL database with advanced querying
-- **Smart Collection**: Avoid duplicates with time-based filtering and metadata tracking
-- **Standard Output**: Output data directly to terminal with `--stdout` flag
-- **Command Line Interface**: Easy-to-use CLI with various collection options
-- **Data Validation**: Built-in data validation and statistics
-- **Database Migrations**: Automated database schema management
-- **Health Monitoring**: Comprehensive system health checks
-- **Unix Systems**: Single binary for Linux, macOS, and other Unix-like systems
+- **🌍 Earthquake Data Collection**: Fetch earthquake data from USGS FDSNWS API
+- **⏰ Interval Scraping**: Run data collection at specified intervals with monitoring
+- **🗄️ PostgreSQL Storage**: Store data in PostgreSQL database with advanced querying
+- **🔄 Smart Collection**: Avoid duplicates with time-based filtering and metadata tracking
+- **👻 Daemon Mode**: Run in background as a daemon process
+- **📊 Health Monitoring**: Comprehensive system health checks and metrics
+- **🛡️ Error Handling**: Robust error handling with exponential backoff
+- **📁 JSON Storage**: Save all data to timestamped JSON files
+- **🌐 Fault Data Collection**: Fetch fault data from EMSC-CSEM API
+- **🔍 Advanced Filtering**: Filter by country, region, magnitude, and time range
+- **📈 Data Validation**: Built-in data validation and statistics
+- **🔄 Database Migrations**: Automated database schema management
 
-## Installation
+## 📋 Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Interval Scraping](#interval-scraping)
+- [Database Storage](#database-storage)
+- [Basic Usage](#basic-usage)
+- [Advanced Features](#advanced-features)
+- [Configuration](#configuration)
+- [Examples](#examples)
+- [Monitoring](#monitoring)
+- [Troubleshooting](#troubleshooting)
+
+## 🛠️ Installation
 
 ### Prerequisites
 
@@ -44,17 +55,6 @@ make build
 make setup
 ```
 
-### Unix Platform Builds
-
-```bash
-# Build for all Unix platforms
-make build-all
-
-# Or build for specific platform
-make build-linux
-make build-darwin
-```
-
 ### Database Setup (Optional)
 
 If you want to use PostgreSQL storage:
@@ -70,7 +70,218 @@ make db-migrate-up
 make db-status
 ```
 
-## Usage
+## 🚀 Quick Start
+
+### Basic Data Collection
+
+```bash
+# Collect recent earthquakes
+./bin/quakewatch-scraper earthquakes recent
+
+# Collect earthquakes and save to database
+./bin/quakewatch-scraper earthquakes recent --storage postgresql
+
+# Collect fault data
+./bin/quakewatch-scraper faults collect --storage postgresql
+```
+
+### Interval Scraping (Recommended)
+
+```bash
+# Collect earthquakes every 5 minutes and save to database
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --smart
+
+# Run in background as daemon
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --daemon \
+  --pid-file /var/run/quakewatch-scraper.pid
+```
+
+## ⏰ Interval Scraping
+
+The interval scraping feature is the core functionality for continuous data collection. It allows you to run data collection commands at specified intervals with comprehensive monitoring, error handling, and scheduling capabilities.
+
+### Basic Interval Scraping
+
+```bash
+# Collect recent earthquakes every 5 minutes
+./bin/quakewatch-scraper interval earthquakes recent --interval 5m
+
+# Collect significant earthquakes every hour
+./bin/quakewatch-scraper interval earthquakes significant --interval 1h
+
+# Collect fault data every 12 hours
+./bin/quakewatch-scraper interval faults collect --interval 12h
+```
+
+### Production-Ready Interval Scraping
+
+```bash
+# Production setup with comprehensive monitoring
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --max-runtime 168h \
+  --backoff exponential \
+  --max-backoff 30m \
+  --continue-on-error \
+  --health-check-interval 10m \
+  --daemon \
+  --pid-file /var/run/quakewatch-scraper.pid \
+  --log-file /var/log/quakewatch-scraper.log \
+  --smart
+```
+
+### Time Format Options
+
+The `--interval` flag accepts various time formats:
+
+- `30s` - 30 seconds
+- `5m` - 5 minutes
+- `1h` - 1 hour
+- `6h` - 6 hours
+- `1d` - 1 day
+- `1w` - 1 week
+
+### Advanced Interval Features
+
+#### Error Handling and Retries
+
+```bash
+# Continue running even if commands fail
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --continue-on-error
+
+# Use exponential backoff for failed operations
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --backoff exponential \
+  --max-backoff 30m
+```
+
+#### Limited Runtime and Executions
+
+```bash
+# Run for maximum 24 hours
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --max-runtime 24h
+
+# Run maximum 100 times
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --max-executions 100
+```
+
+#### Custom Multi-Command Workflows
+
+```bash
+# Run multiple commands in sequence
+./bin/quakewatch-scraper interval custom \
+  --interval 1h \
+  --storage postgresql \
+  --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31,faults collect"
+```
+
+### Daemon Mode
+
+Run the interval scraper in the background as a daemon process:
+
+```bash
+# Start daemon
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --daemon \
+  --pid-file /var/run/quakewatch-scraper.pid \
+  --log-file /var/log/quakewatch-scraper.log
+
+# Check if daemon is running
+ps aux | grep quakewatch-scraper
+
+# Stop daemon
+kill $(cat /var/run/quakewatch-scraper.pid)
+```
+
+## 🗄️ Database Storage
+
+The application supports PostgreSQL as a storage backend, providing structured data storage with advanced querying capabilities.
+
+### Database Setup
+
+```bash
+# Setup PostgreSQL with Docker
+make db-setup-docker
+
+# Run database migrations
+make db-migrate-up
+
+# Check migration status
+make db-status
+```
+
+### Database Operations
+
+```bash
+# Initialize database (creates tables and indexes)
+./bin/quakewatch-scraper db init
+
+# Check database status
+./bin/quakewatch-scraper db status
+
+# Run migrations
+./bin/quakewatch-scraper db migrate up
+
+# Rollback migrations
+./bin/quakewatch-scraper db migrate down
+```
+
+### Data Collection with Database Storage
+
+```bash
+# Collect earthquakes and save to database
+./bin/quakewatch-scraper earthquakes recent --storage postgresql
+
+# Collect faults and save to database
+./bin/quakewatch-scraper faults collect --storage postgresql
+
+# Query earthquakes from database
+./bin/quakewatch-scraper earthquakes query --storage postgresql --limit 100
+```
+
+### Advanced Database Queries
+
+```bash
+# Query by time range
+./bin/quakewatch-scraper earthquakes query \
+  --storage postgresql \
+  --start-time "2024-01-01T00:00:00Z" \
+  --end-time "2024-01-02T00:00:00Z"
+
+# Query by magnitude range
+./bin/quakewatch-scraper earthquakes query \
+  --storage postgresql \
+  --min-magnitude 4.5 \
+  --max-magnitude 10.0
+
+# Query by geographic region
+./bin/quakewatch-scraper earthquakes query \
+  --storage postgresql \
+  --min-lat 32 --max-lat 42 \
+  --min-lon -125 --max-lon -114
+```
+
+## 📖 Basic Usage
 
 ### Basic Commands
 
@@ -113,7 +324,7 @@ make db-status
 ./bin/quakewatch-scraper earthquakes country --country "Japan" --min-mag 4.0
 ```
 
-### Smart Collection (New Feature)
+### Smart Collection
 
 The smart collection feature prevents duplicate data collection by tracking the last collection time:
 
@@ -138,42 +349,6 @@ The smart collection feature prevents duplicate data collection by tracking the 
 ./bin/quakewatch-scraper faults update --retries 5 --retry-delay 10s
 ```
 
-### Interval Scraping
-
-The interval scraping feature allows you to run data collection commands at specified intervals with monitoring and error handling.
-
-```bash
-# Collect recent earthquakes every 5 minutes
-./bin/quakewatch-scraper interval earthquakes recent --interval 5m
-
-# Collect significant earthquakes every hour
-./bin/quakewatch-scraper interval earthquakes significant --interval 1h
-
-# Collect country-specific earthquakes every 6 hours
-./bin/quakewatch-scraper interval earthquakes country --country "Japan" --interval 6h
-
-# Run fault collection every 12 hours
-./bin/quakewatch-scraper interval faults collect --interval 12h
-
-# Run in daemon mode (background)
-./bin/quakewatch-scraper interval earthquakes recent --interval 5m --daemon
-
-# Limited runtime with exponential backoff
-./bin/quakewatch-scraper interval earthquakes recent \
-  --interval 5m \
-  --max-runtime 24h \
-  --backoff exponential \
-  --max-backoff 30m \
-  --continue-on-error
-
-# Custom command combination
-./bin/quakewatch-scraper interval custom \
-  --interval 1h \
-  --commands "earthquakes recent,earthquakes significant --start 2024-01-01 --end 2024-01-31"
-```
-
-For detailed information about interval scraping, see [INTERVAL_README.md](INTERVAL_README.md).
-
 ### Data Management
 
 ```bash
@@ -194,38 +369,27 @@ For detailed information about interval scraping, see [INTERVAL_README.md](INTER
 
 # Validate specific file
 ./bin/quakewatch-scraper validate --file earthquakes_2024-01-01_15-04-05.json
-
-# Delete all data files (with confirmation)
-./bin/quakewatch-scraper purge
-
-# Delete specific data type
-./bin/quakewatch-scraper purge --type earthquakes
-
-# Force delete without confirmation
-./bin/quakewatch-scraper purge --force
-
-# Show what would be deleted (dry run)
-./bin/quakewatch-scraper purge --dry-run
 ```
 
-### Database Operations (New Feature)
+### Output to Standard Output
+
+The `--stdout` flag allows you to output data directly to the terminal:
 
 ```bash
-# Initialize database (creates tables and indexes)
-./bin/quakewatch-scraper db init
+# Output recent earthquakes to stdout
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 5
 
-# Check database status
-./bin/quakewatch-scraper db status
+# Output earthquakes by country to stdout
+./bin/quakewatch-scraper earthquakes country --country "Japan" --stdout
 
-# Run migrations
-./bin/quakewatch-scraper db migrate up
+# Pipe to jq for filtering and formatting
+./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | select(.properties.mag > 4.0)'
 
-# Rollback migrations
-./bin/quakewatch-scraper db migrate down
-
-# Migrate to specific version
-./bin/quakewatch-scraper db migrate to 1
+# Count earthquakes in a region
+./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114 --stdout | jq '.features | length'
 ```
+
+## 🔧 Advanced Features
 
 ### Advanced Options
 
@@ -244,53 +408,22 @@ For detailed information about interval scraping, see [INTERVAL_README.md](INTER
 
 # Use configuration file
 ./bin/quakewatch-scraper earthquakes recent --config ./configs/config.yaml
-
-# Use PostgreSQL storage backend
-./bin/quakewatch-scraper earthquakes recent --storage postgresql
-
-# Use smart collection to avoid duplicates
-./bin/quakewatch-scraper earthquakes recent --smart --storage postgresql
 ```
 
-### Output to Standard Output
-
-The `--stdout` flag allows you to output data directly to the terminal instead of saving to files. This is useful for:
-
-- **Piping to other tools**: Process data with `jq`, `grep`, or other command-line tools
-- **Real-time processing**: View data immediately without file I/O overhead
-- **Integration with scripts**: Capture output for further processing
-- **Debugging**: Quickly inspect data structure and content
+### Health Monitoring
 
 ```bash
-# Output recent earthquakes to stdout
-./bin/quakewatch-scraper earthquakes recent --stdout --limit 5
+# Check all system components
+./bin/quakewatch-scraper health
 
-# Output earthquakes by country to stdout
-./bin/quakewatch-scraper earthquakes country --country "Japan" --stdout
+# Check database health
+./bin/quakewatch-scraper health --storage postgresql
 
-# Output earthquakes by magnitude range to stdout
-./bin/quakewatch-scraper earthquakes magnitude --min 4.0 --max 5.0 --stdout
-
-# Output fault data to stdout
-./bin/quakewatch-scraper faults collect --stdout
-
-# Pipe to jq for filtering and formatting
-./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | select(.properties.mag > 4.0)'
-
-# Count earthquakes in a region
-./bin/quakewatch-scraper earthquakes region --min-lat 32 --max-lat 42 --min-lon -125 --max-lon -114 --stdout | jq '.features | length'
-
-# Extract specific earthquake properties
-./bin/quakewatch-scraper earthquakes recent --stdout | jq '.features[] | {magnitude: .properties.mag, place: .properties.place, time: .properties.time}'
-
-# Save stdout output to a custom file
-./bin/quakewatch-scraper earthquakes recent --stdout > my_earthquakes.json
-
-# Combine with other tools for analysis
-./bin/quakewatch-scraper earthquakes recent --stdout | jq -r '.features[] | "\(.properties.mag) \(.properties.place)"' | sort -n
+# View collection logs
+./bin/quakewatch-scraper db logs --limit 10
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 The application uses a YAML configuration file (`configs/config.yaml`):
 
@@ -366,299 +499,119 @@ DB_CONN_MAX_LIFETIME=5m
 DB_CONN_MAX_IDLE_TIME=5m
 ```
 
-## Data Sources
+## 📝 Examples
 
-### USGS Earthquake API
-- **Endpoint**: https://earthquake.usgs.gov/fdsnws/event/1/
-- **Format**: GeoJSON
-- **Update Frequency**: Real-time (every 5-15 minutes)
-- **Documentation**: https://earthquake.usgs.gov/fdsnws/event/1/
+### Production Setup Examples
 
-### EMSC-CSEM Fault API
-- **Endpoint**: https://www.emsc-csem.org/javascript/gem_active_faults.geojson
-- **Format**: GeoJSON
-- **Content**: Active fault data with geographical coordinates and properties
-
-## Data Structure
-
-### Earthquake Data
-Earthquake data is stored in GeoJSON format with the following structure:
-
-```json
-{
-  "type": "FeatureCollection",
-  "metadata": {
-    "generated": 1640995200000,
-    "url": "https://earthquake.usgs.gov/fdsnws/event/1/query",
-    "title": "USGS Earthquakes",
-    "status": 200,
-    "api": "1.10.3",
-    "count": 1
-  },
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "mag": 4.5,
-        "place": "10km ENE of Somewhere, CA",
-        "time": 1640995200000,
-        "updated": 1640995300000,
-        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/...",
-        "detail": "https://earthquake.usgs.gov/fdsnws/event/1/query...",
-        "felt": 25,
-        "cdi": 3.4,
-        "mmi": 4.2,
-        "alert": "green",
-        "status": "reviewed",
-        "tsunami": 0,
-        "sig": 312,
-        "net": "us",
-        "code": "7000abcd",
-        "ids": ",us7000abcd,",
-        "sources": ",us,",
-        "types": ",dyfi,origin,phase-data,",
-        "nst": 45,
-        "dmin": 0.123,
-        "rms": 0.67,
-        "gap": 45,
-        "magType": "mb",
-        "type": "earthquake",
-        "title": "M 4.5 - 10km ENE of Somewhere, CA"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [-117.1234, 34.5678, 12.3]
-      },
-      "id": "us7000abcd"
-    }
-  ]
-}
-```
-
-### Fault Data
-Fault data is stored in GeoJSON format with the following structure:
-
-```json
-{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "properties": {
-        "id": "fault_001",
-        "name": "San Andreas Fault",
-        "type": "strike-slip",
-        "slip_rate": 25.5,
-        "slip_type": "right-lateral",
-        "dip": 90.0,
-        "rake": 0.0,
-        "length": 1200.0,
-        "width": 15.0,
-        "max_magnitude": 8.0,
-        "description": "Major strike-slip fault in California",
-        "source": "EMSC-CSEM"
-      },
-      "geometry": {
-        "type": "LineString",
-        "coordinates": [
-          [-121.0, 36.0],
-          [-120.5, 36.2],
-          [-120.0, 36.5]
-        ]
-      }
-    }
-  ]
-}
-```
-
-## Development
-
-### Project Structure
-
-```
-quakewatch-scraper/
-├── cmd/
-│   └── scraper/
-│       └── main.go              # Application entry point
-├── internal/
-│   ├── api/
-│   │   ├── usgs.go             # USGS API client
-│   │   └── emsc.go             # EMSC API client
-│   ├── models/
-│   │   ├── earthquake.go       # Earthquake data models
-│   │   └── fault.go            # Fault data models
-│   ├── collector/
-│   │   ├── earthquake.go       # Earthquake data collector
-│   │   └── fault.go            # Fault data collector
-│   ├── storage/
-│   │   ├── interface.go        # Storage interface
-│   │   ├── json.go             # JSON file storage
-│   │   ├── postgresql.go       # PostgreSQL storage
-│   │   └── migrate.go          # Database migrations
-│   ├── scheduler/
-│   │   ├── interval.go         # Interval scheduling
-│   │   ├── daemon.go           # Daemon mode
-│   │   ├── backoff.go          # Backoff strategies
-│   │   ├── executor.go         # Command execution
-│   │   ├── health.go           # Health monitoring
-│   │   └── metrics.go          # Metrics collection
-│   ├── config/
-│   │   └── config.go           # Configuration management
-│   └── utils/
-│       └── logger.go           # Logging utilities
-├── pkg/
-│   └── cli/
-│       └── commands.go         # CLI commands
-├── migrations/
-│   ├── 001_create_initial_schema.up.sql
-│   ├── 001_create_initial_schema.down.sql
-│   ├── 002_create_collection_metadata.up.sql
-│   └── 002_create_collection_metadata.down.sql
-├── configs/
-│   └── config.yaml             # Configuration file
-├── data/
-│   ├── earthquakes/            # Earthquake data files
-│   └── faults/                 # Fault data files
-├── go.mod                      # Go module file
-├── go.sum                      # Go module checksums
-├── Makefile                    # Build and development tasks
-├── README.md                   # This file
-├── DATABASE.md                 # Database documentation
-├── SMART_COLLECTION.md         # Smart collection documentation
-├── IMPLEMENTATION_SUMMARY.md   # Implementation summary
-├── RELEASE.md                  # Release guide
-└── IMPLEMENTATION_PLAN.md      # Implementation plan
-```
-
-### Running Tests
+#### Continuous Earthquake Monitoring
 
 ```bash
-# Run all tests
-make test
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run tests with verbose output
-go test -v ./...
+# Monitor recent earthquakes every 5 minutes
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --storage postgresql \
+  --smart \
+  --daemon \
+  --pid-file /var/run/quakewatch-scraper.pid \
+  --log-file /var/log/quakewatch-scraper.log
 ```
 
-### Code Quality
+#### Regional Earthquake Monitoring
 
 ```bash
-# Format code
-make fmt
-
-# Generate documentation
-make docs
-```
-
-### Quick Testing
-
-```bash
-# Test the application
-make test-app
-
-# Test earthquake collection
-make test-earthquakes
-
-# Test fault collection
-make test-faults
-```
-
-### Database Development
-
-```bash
-# Setup database with Docker
-make db-setup-docker
-
-# Run migrations
-make db-migrate-up
-
-# Check migration status
-make db-status
-
-# Stop database
-make db-stop-docker
-
-# Setup environment variables
-make setup-env
-```
-
-## Examples
-
-### Collect Recent Earthquakes
-
-```bash
-# Collect last 50 earthquakes
-./bin/quakewatch-scraper earthquakes recent --limit 50 --filename recent_quakes
-```
-
-### Collect Historical Data
-
-```bash
-# Collect earthquakes for a specific date range
-./bin/quakewatch-scraper earthquakes time-range \
-  --start "2024-01-01" \
-  --end "2024-01-31" \
-  --limit 5000 \
-  --filename january_2024_quakes
-```
-
-### Collect Significant Earthquakes
-
-```bash
-# Collect significant earthquakes for the past year
-./bin/quakewatch-scraper earthquakes significant \
-  --start "2023-01-01" \
-  --end "2024-01-01" \
-  --limit 1000 \
-  --filename significant_2023
-```
-
-### Collect Regional Data
-
-```bash
-# Collect earthquakes in California region
-./bin/quakewatch-scraper earthquakes region \
+# Monitor California earthquakes every 15 minutes
+./bin/quakewatch-scraper interval earthquakes region \
+  --interval 15m \
+  --storage postgresql \
   --min-lat 32.0 \
   --max-lat 42.0 \
   --min-lon -125.0 \
   --max-lon -114.0 \
-  --limit 1000 \
-  --filename california_quakes
+  --smart
 ```
 
-### Smart Collection Examples
+#### Significant Earthquake Monitoring
 
 ```bash
-# Smart collection with PostgreSQL (avoids duplicates)
-./bin/quakewatch-scraper earthquakes recent --smart --storage postgresql
-
-# Time-based collection (last 6 hours)
-./bin/quakewatch-scraper earthquakes recent --hours-back 6 --storage postgresql
-
-# Smart collection with JSON storage
-./bin/quakewatch-scraper earthquakes recent --smart --storage json
+# Monitor significant earthquakes every hour
+./bin/quakewatch-scraper interval earthquakes significant \
+  --interval 1h \
+  --storage postgresql \
+  --start "2024-01-01" \
+  --end "2024-12-31"
 ```
 
-### Monitor System Health
+### Development Examples
+
+#### Quick Testing
 
 ```bash
-# Check all system components
+# Test recent earthquake collection
+./bin/quakewatch-scraper earthquakes recent --stdout --limit 5
+
+# Test interval scraping for 10 minutes
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 30s \
+  --max-executions 20 \
+  --storage postgresql
+```
+
+#### Data Analysis
+
+```bash
+# Query earthquakes from database
+./bin/quakewatch-scraper earthquakes query \
+  --storage postgresql \
+  --min-magnitude 4.0 \
+  --limit 100
+
+# Export data for analysis
+./bin/quakewatch-scraper earthquakes query \
+  --storage postgresql \
+  --start-time "2024-01-01T00:00:00Z" \
+  --end-time "2024-01-31T23:59:59Z" \
+  --stdout > january_earthquakes.json
+```
+
+## 📊 Monitoring
+
+### Health Checks
+
+```bash
+# Check system health
 ./bin/quakewatch-scraper health
-
-# List available data files
-./bin/quakewatch-scraper list
-
-# Show data statistics
-./bin/quakewatch-scraper stats --type earthquakes
 
 # Check database health
 ./bin/quakewatch-scraper health --storage postgresql
+
+# Check specific components
+./bin/quakewatch-scraper health --storage postgresql --api usgs
 ```
 
-## Troubleshooting
+### Logging and Metrics
+
+The interval scraper provides detailed logging:
+
+```
+[2024-01-15 10:00:00] Starting interval scraper
+[2024-01-15 10:00:00] Configuration: interval=5m, max-runtime=24h, backoff=exponential
+[2024-01-15 10:00:00] Executing command: earthquakes recent
+[2024-01-15 10:00:00] Found 15 earthquakes
+[2024-01-15 10:00:00] Successfully collected and saved 15 earthquakes
+[2024-01-15 10:00:00] Next execution in 5 minutes
+```
+
+### Database Statistics
+
+```bash
+# Get database statistics
+./bin/quakewatch-scraper db stats
+
+# Monitor collection logs
+./bin/quakewatch-scraper db logs --limit 10
+```
+
+## 🔧 Troubleshooting
 
 ### Common Issues
 
@@ -667,24 +620,31 @@ make setup-env
    - Verify API endpoints are accessible
    - Check rate limiting settings
 
-2. **File Permission Errors**
-   - Ensure write permissions to output directory
-   - Check disk space availability
-
-3. **Invalid Date Formats**
-   - Use YYYY-MM-DD format for dates
-   - Ensure dates are in chronological order
-
-4. **Database Connection Issues**
+2. **Database Connection Issues**
    - Verify PostgreSQL is running
    - Check database credentials
    - Ensure migrations have been run
+
+3. **File Permission Errors**
+   - Ensure write permissions to output directory
+   - Check disk space availability
+
+4. **Interval Scraper Issues**
+   - Check PID file permissions
+   - Verify log file directory exists
+   - Monitor system resources
 
 ### Debug Mode
 
 ```bash
 # Enable verbose logging
 ./bin/quakewatch-scraper earthquakes recent --verbose --log-level debug
+
+# Debug interval scraper
+./bin/quakewatch-scraper interval earthquakes recent \
+  --interval 5m \
+  --verbose \
+  --log-level debug
 ```
 
 ### Health Check
@@ -694,15 +654,14 @@ make setup-env
 ./bin/quakewatch-scraper health
 ```
 
-## Additional Documentation
+## 📚 Additional Documentation
 
 - **[DATABASE.md](DATABASE.md)**: Complete PostgreSQL database implementation guide
+- **[INTERVAL_README.md](INTERVAL_README.md)**: Detailed interval scraping documentation
 - **[SMART_COLLECTION.md](SMART_COLLECTION.md)**: Smart collection feature documentation
 - **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)**: Implementation summary and overview
-- **[RELEASE.md](RELEASE.md)**: Release and deployment guide
-- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)**: Detailed implementation plan
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -711,11 +670,11 @@ make setup-env
 5. Run the test suite
 6. Submit a pull request
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Support
+## 🆘 Support
 
 For issues and questions:
 - Create an issue in the repository
@@ -723,12 +682,13 @@ For issues and questions:
 - Review the configuration options
 - Consult the additional documentation files
 
-## Roadmap
+## 🗺️ Roadmap
 
 - [x] Database integration (PostgreSQL)
 - [x] Smart collection features
 - [x] Database migrations
 - [x] Health monitoring
+- [x] Interval scraping with monitoring
 - [ ] Real-time monitoring capabilities
 - [ ] Advanced filtering and processing
 - [ ] API server functionality
