@@ -62,17 +62,19 @@ func (s *PostgreSQLStorage) SaveEarthquakes(ctx context.Context, earthquakes *mo
 
 	query := `
 		INSERT INTO earthquakes (
-			usgs_id, magnitude, magnitude_type, place, time, url, detail_url,
+			usgs_id, magnitude, magnitude_type, place, time, updated, url, detail_url,
 			felt, cdi, mmi, alert, status, tsunami, sig, net, code,
 			ids, sources, types, nst, dmin, rms, gap, latitude, longitude, depth, title
 		) VALUES (
-			:usgs_id, :magnitude, :magnitude_type, :place, :time, :url, :detail_url,
+			:usgs_id, :magnitude, :magnitude_type, :place, :time, :updated, :url, :detail_url,
 			:felt, :cdi, :mmi, :alert, :status, :tsunami, :sig, :net, :code,
 			:ids, :sources, :types, :nst, :dmin, :rms, :gap, :latitude, :longitude, :depth, :title
 		) ON CONFLICT (usgs_id) DO UPDATE SET
 			magnitude = EXCLUDED.magnitude,
 			magnitude_type = EXCLUDED.magnitude_type,
 			place = EXCLUDED.place,
+			time = EXCLUDED.time,
+			updated = EXCLUDED.updated,
 			url = EXCLUDED.url,
 			detail_url = EXCLUDED.detail_url,
 			felt = EXCLUDED.felt,
@@ -118,7 +120,8 @@ func (s *PostgreSQLStorage) SaveEarthquakes(ctx context.Context, earthquakes *mo
 			"magnitude":      earthquake.Properties.Mag,
 			"magnitude_type": earthquake.Properties.MagType,
 			"place":          earthquake.Properties.Place,
-			"time":           earthquake.Properties.Time,
+			"time":           earthquake.Properties.GetTime(),
+			"updated":        earthquake.Properties.GetUpdated(),
 			"url":            earthquake.Properties.URL,
 			"detail_url":     earthquake.Properties.Detail,
 			"felt":           earthquake.Properties.Felt,
@@ -420,14 +423,17 @@ func (s *PostgreSQLStorage) LogCollection(ctx context.Context, dataType, source 
 		)
 	`
 
-	var endTime *int64
+	// Convert startTime from milliseconds to time.Time
+	startTimeConverted := time.Unix(startTime/1000, 0)
+
+	var endTime *time.Time
 	if status == "completed" || status == "failed" {
-		now := time.Now().UnixMilli()
+		now := time.Now()
 		endTime = &now
 	}
 
-	createdAt := time.Now().UnixMilli()
-	_, err := s.db.ExecContext(ctx, query, dataType, source, startTime, endTime, recordsCollected, status, errorMsg, createdAt)
+	createdAt := time.Now()
+	_, err := s.db.ExecContext(ctx, query, dataType, source, startTimeConverted, endTime, recordsCollected, status, errorMsg, createdAt)
 	if err != nil {
 		return fmt.Errorf("failed to log collection: %w", err)
 	}

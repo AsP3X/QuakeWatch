@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 
@@ -96,6 +97,9 @@ func (a *App) setupCommands() {
 
 	// Add interval commands
 	a.rootCmd.AddCommand(a.newIntervalCmd())
+
+	// Add database commands
+	a.rootCmd.AddCommand(a.newDatabaseCmd())
 
 	// Add utility commands
 	a.rootCmd.AddCommand(a.newValidateCmd())
@@ -1506,4 +1510,344 @@ func (a *App) runIntervalCommand(cmd *cobra.Command, intervalConfig *config.Inte
 		logger.Printf("Starting interval scheduler")
 		return scheduler.Start(ctx, "quakewatch-scraper", cmdArgs)
 	}
+}
+
+// newDatabaseCmd creates the database command
+func (a *App) newDatabaseCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "db",
+		Short: "Database management commands",
+		Long:  `Manage database initialization, migrations, and status`,
+	}
+
+	// Database init command
+	initCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize database and run migrations",
+		Long:  `Initialize the database by creating the database if it doesn't exist and running all migrations`,
+		RunE:  a.runDatabaseInit,
+	}
+	initCmd.Flags().Bool("force", false, "Force re-initialization even if database exists")
+	cmd.AddCommand(initCmd)
+
+	// Database migrate command
+	migrateCmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Database migration commands",
+		Long:  `Manage database migrations`,
+	}
+
+	// Migrate up command
+	migrateUpCmd := &cobra.Command{
+		Use:   "up",
+		Short: "Run all pending migrations",
+		Long:  `Apply all pending database migrations`,
+		RunE:  a.runDatabaseMigrateUp,
+	}
+	migrateCmd.AddCommand(migrateUpCmd)
+
+	// Migrate down command
+	migrateDownCmd := &cobra.Command{
+		Use:   "down",
+		Short: "Rollback all migrations",
+		Long:  `Rollback all database migrations`,
+		RunE:  a.runDatabaseMigrateDown,
+	}
+	migrateCmd.AddCommand(migrateDownCmd)
+
+	// Migrate to version command
+	migrateToCmd := &cobra.Command{
+		Use:   "to",
+		Short: "Migrate to specific version",
+		Long:  `Migrate database to a specific version`,
+		RunE:  a.runDatabaseMigrateTo,
+	}
+	migrateToCmd.Flags().Uint("version", 0, "Target migration version")
+	if err := migrateToCmd.MarkFlagRequired("version"); err != nil {
+		panic(fmt.Sprintf("failed to mark version flag as required: %v", err))
+	}
+	migrateCmd.AddCommand(migrateToCmd)
+
+	// Force version command
+	forceCmd := &cobra.Command{
+		Use:   "force",
+		Short: "Force migration version",
+		Long:  `Force the database migration version (use with caution)`,
+		RunE:  a.runDatabaseForceVersion,
+	}
+	forceCmd.Flags().Uint("version", 0, "Target migration version")
+	if err := forceCmd.MarkFlagRequired("version"); err != nil {
+		panic(fmt.Sprintf("failed to mark version flag as required: %v", err))
+	}
+	migrateCmd.AddCommand(forceCmd)
+
+	cmd.AddCommand(migrateCmd)
+
+	// Database status command
+	statusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show database status and migration information",
+		Long:  `Display current database status, connection info, and migration version`,
+		RunE:  a.runDatabaseStatus,
+	}
+	cmd.AddCommand(statusCmd)
+
+	return cmd
+}
+
+// runDatabaseInit initializes the database
+func (a *App) runDatabaseInit(cmd *cobra.Command, args []string) error {
+	fmt.Println("Initializing database...")
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	force, _ := cmd.Flags().GetBool("force")
+
+	// Create migration manager
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create migration manager: %w", err)
+	}
+	defer migrationManager.Close()
+
+	// Check if database exists and is accessible
+	fmt.Println("Checking database connection...")
+	if err := migrationManager.TestConnection(); err != nil {
+		if force {
+			fmt.Println("Database connection failed, but continuing with force flag...")
+		} else {
+			return fmt.Errorf("database connection failed: %w", err)
+		}
+	} else {
+		fmt.Println("Database connection successful")
+	}
+
+	// Run migrations
+	fmt.Println("Running database migrations...")
+	if err := migrationManager.MigrateUp(); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Create a new migration manager to get version (since the previous one closed the connection)
+	versionManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create version manager: %w", err)
+	}
+	defer versionManager.Close()
+
+	// Get current version
+	version, dirty, err := versionManager.GetVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get migration version: %w", err)
+	}
+
+	fmt.Printf("Database initialized successfully!\n")
+	fmt.Printf("Current migration version: %d\n", version)
+	if dirty {
+		fmt.Println("Warning: Database is in dirty state")
+	}
+
+	return nil
+}
+
+// runDatabaseMigrateUp runs all pending migrations
+func (a *App) runDatabaseMigrateUp(cmd *cobra.Command, args []string) error {
+	fmt.Println("Running database migrations...")
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	// Create migration manager
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create migration manager: %w", err)
+	}
+	defer migrationManager.Close()
+
+	// Run migrations
+	if err := migrationManager.MigrateUp(); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Create a new migration manager to get version (since the previous one closed the connection)
+	versionManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create version manager: %w", err)
+	}
+	defer versionManager.Close()
+
+	// Get current version
+	version, dirty, err := versionManager.GetVersion()
+	if err != nil {
+		return fmt.Errorf("failed to get migration version: %w", err)
+	}
+
+	fmt.Printf("Migrations completed successfully!\n")
+	fmt.Printf("Current migration version: %d\n", version)
+	if dirty {
+		fmt.Println("Warning: Database is in dirty state")
+	}
+
+	return nil
+}
+
+// runDatabaseMigrateDown rolls back all migrations
+func (a *App) runDatabaseMigrateDown(cmd *cobra.Command, args []string) error {
+	fmt.Println("Rolling back all database migrations...")
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	// Create migration manager
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create migration manager: %w", err)
+	}
+	defer migrationManager.Close()
+
+	// Run migrations down
+	if err := migrationManager.MigrateDown(); err != nil {
+		return fmt.Errorf("failed to rollback migrations: %w", err)
+	}
+
+	fmt.Println("All migrations rolled back successfully!")
+	return nil
+}
+
+// runDatabaseMigrateTo migrates to a specific version
+func (a *App) runDatabaseMigrateTo(cmd *cobra.Command, args []string) error {
+	version, _ := cmd.Flags().GetUint("version")
+	fmt.Printf("Migrating database to version %d...\n", version)
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	// Create migration manager
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create migration manager: %w", err)
+	}
+	defer migrationManager.Close()
+
+	// Migrate to specific version
+	if err := migrationManager.MigrateToVersion(version); err != nil {
+		return fmt.Errorf("failed to migrate to version %d: %w", version, err)
+	}
+
+	fmt.Printf("Successfully migrated to version %d!\n", version)
+	return nil
+}
+
+// runDatabaseForceVersion forces the migration version
+func (a *App) runDatabaseForceVersion(cmd *cobra.Command, args []string) error {
+	version, _ := cmd.Flags().GetUint("version")
+	fmt.Printf("Forcing database migration version to %d...\n", version)
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	// Create migration manager
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		return fmt.Errorf("failed to create migration manager: %w", err)
+	}
+	defer migrationManager.Close()
+
+	// Force version
+	if err := migrationManager.ForceVersion(version); err != nil {
+		return fmt.Errorf("failed to force version %d: %w", version, err)
+	}
+
+	fmt.Printf("Successfully forced migration version to %d!\n", version)
+	return nil
+}
+
+// runDatabaseStatus shows database status
+func (a *App) runDatabaseStatus(cmd *cobra.Command, args []string) error {
+	fmt.Println("Database Status")
+	fmt.Println("===============")
+
+	// Check if database configuration is available
+	if a.cfg == nil {
+		fmt.Println("❌ Configuration not found")
+		return fmt.Errorf("configuration not found. Please check your config file")
+	}
+
+	// Display configuration
+	fmt.Printf("Host: %s:%d\n", a.cfg.Database.Host, a.cfg.Database.Port)
+	fmt.Printf("Database: %s\n", a.cfg.Database.Database)
+	fmt.Printf("User: %s\n", a.cfg.Database.User)
+	fmt.Printf("SSL Mode: %s\n", a.cfg.Database.SSLMode)
+
+	// Test connection
+	fmt.Println("\nConnection Test:")
+	migrationManager, err := storage.NewMigrationManager(&a.cfg.Database)
+	if err != nil {
+		fmt.Printf("❌ Failed to create migration manager: %v\n", err)
+		return nil
+	}
+	defer migrationManager.Close()
+
+	if err := migrationManager.TestConnection(); err != nil {
+		fmt.Printf("❌ Database connection failed: %v\n", err)
+		return nil
+	}
+	fmt.Println("✅ Database connection successful")
+
+	// Get migration status
+	fmt.Println("\nMigration Status:")
+	version, dirty, err := migrationManager.GetVersionWithoutClose()
+	if err != nil {
+		fmt.Printf("❌ Failed to get migration version: %v\n", err)
+		return nil
+	}
+
+	fmt.Printf("Current Version: %d\n", version)
+	if dirty {
+		fmt.Println("⚠️  Database is in dirty state")
+	} else {
+		fmt.Println("✅ Database is clean")
+	}
+
+	// Check if tables exist using a separate connection
+	fmt.Println("\nTable Status:")
+	tables := []string{"earthquakes", "faults", "collection_logs", "collection_metadata"}
+
+	// Create a separate database connection for table checks
+	db, err := sqlx.Connect("postgres", a.cfg.Database.GetDSN())
+	if err != nil {
+		fmt.Printf("❌ Failed to create database connection for table checks: %v\n", err)
+	} else {
+		defer db.Close()
+
+		for _, table := range tables {
+			var exists bool
+			query := `SELECT EXISTS (
+				SELECT FROM information_schema.tables 
+				WHERE table_schema = 'public' 
+				AND table_name = $1
+			)`
+			err := db.Get(&exists, query, table)
+			if err != nil {
+				fmt.Printf("❌ %s: Error checking table - %v\n", table, err)
+			} else if exists {
+				fmt.Printf("✅ %s: Table exists\n", table)
+			} else {
+				fmt.Printf("❌ %s: Table does not exist\n", table)
+			}
+		}
+	}
+
+	return nil
 }
