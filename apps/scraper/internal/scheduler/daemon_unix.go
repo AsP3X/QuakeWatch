@@ -1,3 +1,5 @@
+//go:build !windows
+
 package scheduler
 
 import (
@@ -9,24 +11,24 @@ import (
 	"syscall"
 )
 
-// DaemonManager handles daemon process management
-type DaemonManager struct {
+// UnixDaemonManager handles daemon process management on Unix systems
+type UnixDaemonManager struct {
 	pidFile string
 	logFile string
 	logger  *log.Logger
 }
 
-// NewDaemonManager creates a new daemon manager
-func NewDaemonManager(pidFile, logFile string, logger *log.Logger) *DaemonManager {
-	return &DaemonManager{
-		pidFile: pidFile,
-		logFile: logFile,
-		logger:  logger,
+// newPlatformDaemonManager creates a Unix daemon manager
+func newPlatformDaemonManager(config DaemonConfig) DaemonManager {
+	return &UnixDaemonManager{
+		pidFile: config.PIDFile,
+		logFile: config.LogFile,
+		logger:  config.Logger,
 	}
 }
 
 // Start starts the daemon process
-func (d *DaemonManager) Start() error {
+func (d *UnixDaemonManager) Start() error {
 	// Check if daemon is already running
 	if d.IsRunning() {
 		return fmt.Errorf("daemon is already running (PID file exists: %s)", d.pidFile)
@@ -53,7 +55,7 @@ func (d *DaemonManager) Start() error {
 }
 
 // fork creates a new process and returns the PID
-func (d *DaemonManager) fork() (int, error) {
+func (d *UnixDaemonManager) fork() (int, error) {
 	// For Linux systems, we'll use a simpler approach
 	// The actual forking will be handled by the parent process exiting
 	// and the child continuing execution
@@ -69,7 +71,7 @@ func (d *DaemonManager) fork() (int, error) {
 }
 
 // setupDaemon sets up the daemon environment
-func (d *DaemonManager) setupDaemon() error {
+func (d *UnixDaemonManager) setupDaemon() error {
 	// Set up signal handlers
 	d.setupSignalHandlers()
 
@@ -88,7 +90,7 @@ func (d *DaemonManager) setupDaemon() error {
 }
 
 // setupSignalHandlers sets up signal handlers for graceful shutdown
-func (d *DaemonManager) setupSignalHandlers() {
+func (d *UnixDaemonManager) setupSignalHandlers() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
@@ -100,7 +102,7 @@ func (d *DaemonManager) setupSignalHandlers() {
 }
 
 // Stop stops the daemon process
-func (d *DaemonManager) Stop() error {
+func (d *UnixDaemonManager) Stop() error {
 	d.logger.Printf("Stopping daemon")
 
 	if err := d.RemovePID(); err != nil {
@@ -112,7 +114,7 @@ func (d *DaemonManager) Stop() error {
 }
 
 // IsRunning checks if the daemon is running by checking the PID file
-func (d *DaemonManager) IsRunning() bool {
+func (d *UnixDaemonManager) IsRunning() bool {
 	if d.pidFile == "" {
 		return false
 	}
@@ -139,7 +141,7 @@ func (d *DaemonManager) IsRunning() bool {
 }
 
 // WritePID writes the current process ID to the PID file
-func (d *DaemonManager) WritePID() error {
+func (d *UnixDaemonManager) WritePID() error {
 	if d.pidFile == "" {
 		return fmt.Errorf("PID file path not specified")
 	}
@@ -151,7 +153,7 @@ func (d *DaemonManager) WritePID() error {
 }
 
 // RemovePID removes the PID file
-func (d *DaemonManager) RemovePID() error {
+func (d *UnixDaemonManager) RemovePID() error {
 	if d.pidFile == "" {
 		return nil
 	}
@@ -160,7 +162,7 @@ func (d *DaemonManager) RemovePID() error {
 }
 
 // SetupLogging sets up logging for daemon mode
-func (d *DaemonManager) SetupLogging() error {
+func (d *UnixDaemonManager) SetupLogging() error {
 	if d.logFile == "" {
 		return nil
 	}
