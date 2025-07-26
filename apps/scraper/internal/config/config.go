@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
+
+	"quakewatch-scraper/internal/utils"
 
 	"github.com/spf13/viper"
 )
@@ -77,6 +81,8 @@ type IntervalConfig struct {
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
+	pathManager := utils.NewPathManager()
+
 	return &Config{
 		API: APIConfig{
 			USGS: USGSConfig{
@@ -90,7 +96,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Storage: StorageConfig{
-			OutputDir:      "./data",
+			OutputDir:      pathManager.GetDefaultDataDir(),
 			EarthquakesDir: "earthquakes",
 			FaultsDir:      "faults",
 		},
@@ -131,8 +137,8 @@ func DefaultConfig() *Config {
 			SkipEmpty:           false,
 			HealthCheckInterval: 5 * time.Minute,
 			DaemonMode:          false,
-			PIDFile:             "/var/run/quakewatch-scraper.pid",
-			LogFile:             "/var/log/quakewatch-scraper.log",
+			PIDFile:             pathManager.GetDefaultPIDFile(),
+			LogFile:             pathManager.GetDefaultLogFile(),
 		},
 	}
 }
@@ -146,8 +152,19 @@ func LoadConfig(configPath string) (*Config, error) {
 	if configPath != "" {
 		viper.SetConfigFile(configPath)
 	} else {
+		// Add multiple search paths for config file
 		viper.AddConfigPath("./configs")
 		viper.AddConfigPath(".")
+
+		// Add executable directory path
+		if execDir, err := getExecutableDir(); err == nil {
+			viper.AddConfigPath(execDir)
+			viper.AddConfigPath(filepath.Join(execDir, "configs"))
+		}
+
+		// Add platform-specific paths
+		pathManager := utils.NewPathManager()
+		viper.AddConfigPath(pathManager.GetDefaultConfigDir())
 	}
 
 	// Try to read the config file
@@ -157,9 +174,11 @@ func LoadConfig(configPath string) (*Config, error) {
 			// Config file not found, check if user wants to create one
 			return handleMissingConfig(configPath)
 		}
-		// Check if the error message contains "no such file"
-		if err.Error() == "open ./configs/config.yaml: no such file or directory" ||
-			err.Error() == "open config.yaml: no such file or directory" {
+		// Check if the error message indicates a missing file or directory
+		errMsg := err.Error()
+		if contains(errMsg, "no such file or directory") ||
+			contains(errMsg, "The system cannot find the path specified") ||
+			contains(errMsg, "cannot find the file specified") {
 			return handleMissingConfig(configPath)
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
@@ -185,16 +204,39 @@ func handleMissingConfig(configPath string) (*Config, error) {
 	}
 
 	if response == "y" || response == "Y" || response == "yes" || response == "YES" {
-		return createInteractiveConfig(configPath)
+		return CreateInteractiveConfig(configPath)
 	}
 
 	// User chose not to create config, use defaults
-	fmt.Println("Using default configuration.")
-	return DefaultConfig(), nil
+	fmt.Println("Using default configuration with platform-appropriate paths.")
+
+	// Create default config directories if they don't exist
+	config := DefaultConfig()
+
+	// Ensure data directory exists
+	if err := os.MkdirAll(config.Storage.OutputDir, 0755); err != nil {
+		fmt.Printf("Warning: Could not create data directory %s: %v\n", config.Storage.OutputDir, err)
+	}
+
+	// Ensure config directory exists - try executable directory first
+	configDir := "./configs"
+	if configPath != "" {
+		configDir = filepath.Dir(configPath)
+	} else {
+		// Try to create config in executable directory
+		if execDir, err := getExecutableDir(); err == nil {
+			configDir = filepath.Join(execDir, "configs")
+		}
+	}
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		fmt.Printf("Warning: Could not create config directory %s: %v\n", configDir, err)
+	}
+
+	return config, nil
 }
 
-// createInteractiveConfig creates a configuration file through user interaction
-func createInteractiveConfig(configPath string) (*Config, error) {
+// CreateInteractiveConfig creates a configuration file through user interaction
+func CreateInteractiveConfig(configPath string) (*Config, error) {
 	fmt.Println("\n=== QuakeWatch Scraper Configuration Setup ===")
 
 	config := DefaultConfig()
@@ -204,24 +246,25 @@ func createInteractiveConfig(configPath string) (*Config, error) {
 
 	// USGS API
 	fmt.Printf("USGS API Base URL (default: %s): ", config.API.USGS.BaseURL)
-	var usgsURL string
-	fmt.Scanln(&usgsURL)
+	usgsURL := readInput()
 	if usgsURL != "" {
 		config.API.USGS.BaseURL = usgsURL
 	}
 
 	fmt.Printf("USGS API Timeout in seconds (default: %.0f): ", config.API.USGS.Timeout.Seconds())
-	var usgsTimeout int
-	fmt.Scanln(&usgsTimeout)
-	if usgsTimeout > 0 {
-		config.API.USGS.Timeout = time.Duration(usgsTimeout) * time.Second
+	usgsTimeoutStr := readInput()
+	if usgsTimeoutStr != "" {
+		if usgsTimeout, err := strconv.Atoi(usgsTimeoutStr); err == nil && usgsTimeout > 0 {
+			config.API.USGS.Timeout = time.Duration(usgsTimeout) * time.Second
+		}
 	}
 
 	fmt.Printf("USGS API Rate Limit (default: %d): ", config.API.USGS.RateLimit)
-	var usgsRateLimit int
-	fmt.Scanln(&usgsRateLimit)
-	if usgsRateLimit > 0 {
-		config.API.USGS.RateLimit = usgsRateLimit
+	usgsRateLimitStr := readInput()
+	if usgsRateLimitStr != "" {
+		if usgsRateLimit, err := strconv.Atoi(usgsRateLimitStr); err == nil && usgsRateLimit > 0 {
+			config.API.USGS.RateLimit = usgsRateLimit
+		}
 	}
 
 	// EMSC API
@@ -459,4 +502,38 @@ func getConfigPath(configPath string) string {
 		return configPath
 	}
 	return "./configs/config.yaml"
+}
+
+// getExecutableDir returns the directory containing the current executable
+func getExecutableDir() (string, error) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(execPath), nil
+}
+
+// contains checks if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}
+
+// readInput reads a line of input and returns it, handling empty input gracefully
+func readInput() string {
+	var input string
+	fmt.Scanln(&input)
+	// Trim whitespace and check for common "no" responses
+	input = strings.TrimSpace(input)
+	if input == "n" || input == "N" || input == "no" || input == "NO" {
+		return ""
+	}
+	return input
 }

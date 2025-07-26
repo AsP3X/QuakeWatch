@@ -17,7 +17,7 @@ type IntervalScheduler struct {
 	logger    *log.Logger
 	stopChan  chan struct{}
 	doneChan  chan struct{}
-	daemon    *DaemonManager
+	daemon    DaemonManager
 	metrics   *Metrics
 	mu        sync.RWMutex
 	isRunning bool
@@ -31,8 +31,12 @@ func NewIntervalScheduler(cfg *config.IntervalConfig, logger *log.Logger) *Inter
 		logger:   logger,
 		stopChan: make(chan struct{}),
 		doneChan: make(chan struct{}),
-		daemon:   NewDaemonManager(cfg.PIDFile, cfg.LogFile, logger),
-		metrics:  NewMetrics(),
+		daemon: NewDaemonManager(DaemonConfig{
+			PIDFile: cfg.PIDFile,
+			LogFile: cfg.LogFile,
+			Logger:  logger,
+		}),
+		metrics: NewMetrics(),
 	}
 }
 
