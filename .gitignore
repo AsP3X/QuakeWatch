@@ -139,6 +139,14 @@ public
 apps/scraper/data/earthquakes/*.json
 apps/scraper/data/faults/*.json
 
+# ===== CONFIGURATION FILES =====
+# Configuration files (should not be committed to version control)
+apps/scraper/configs/config.yaml
+apps/scraper/configs/*.yaml
+apps/scraper/configs/*.yml
+apps/scraper/configs/*.json
+apps/scraper/configs/*.toml
+
 # ===== DATABASE =====
 # PostgreSQL data
 postgres-data/

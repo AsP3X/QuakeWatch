@@ -40,7 +40,6 @@ func (c *EarthquakeCollector) CollectRecent(ctx context.Context, limit int, file
 		return fmt.Errorf("failed to save earthquakes: %w", err)
 	}
 
-	fmt.Printf("Saved earthquakes to %s\n", filename)
 	return nil
 }
 
@@ -62,7 +61,6 @@ func (c *EarthquakeCollector) CollectByTimeRange(ctx context.Context, startTime,
 		return fmt.Errorf("failed to save earthquakes: %w", err)
 	}
 
-	fmt.Printf("Saved earthquakes to %s\n", filename)
 	return nil
 }
 
@@ -103,7 +101,6 @@ func (c *EarthquakeCollector) CollectSignificant(ctx context.Context, startTime,
 		return fmt.Errorf("failed to save earthquakes: %w", err)
 	}
 
-	fmt.Printf("Saved significant earthquakes to %s\n", filename)
 	return nil
 }
 
@@ -123,7 +120,6 @@ func (c *EarthquakeCollector) CollectByRegion(ctx context.Context, minLat, maxLa
 		return fmt.Errorf("failed to save earthquakes: %w", err)
 	}
 
-	fmt.Printf("Saved earthquakes to %s\n", filename)
 	return nil
 }
 
@@ -170,7 +166,6 @@ func (c *EarthquakeCollector) CollectByCountry(ctx context.Context, country stri
 		return fmt.Errorf("failed to save earthquakes: %w", err)
 	}
 
-	fmt.Printf("Saved earthquakes to %s\n", filename)
 	return nil
 }
 

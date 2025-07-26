@@ -49,31 +49,21 @@ func NewApp() *App {
 
 	// Set up the PersistentPreRunE after creating the app
 	app.rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		// Skip configuration loading for version command
-		if cmd.Name() == "version" {
+		// Skip configuration loading for version and config commands
+		if cmd.Name() == "version" || cmd.Name() == "config" {
 			return nil
 		}
 
 		// Load configuration for all commands
 		configPath, _ := cmd.Flags().GetString("config")
 
-		// Only prompt for configuration if no command is given (showBanner)
-		if cmd.Name() == "quakewatch-scraper" {
-			// Load configuration - this will handle missing config files interactively
-			cfg, err := config.LoadConfig(configPath)
-			if err != nil {
-				return err
-			}
-			app.cfg = cfg
+		// Load configuration for all commands
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			// If config loading fails, use default configuration
+			app.cfg = config.DefaultConfig()
 		} else {
-			// For other commands, load configuration without prompting
-			cfg, err := config.LoadConfig(configPath)
-			if err != nil {
-				// If config loading fails, use default configuration
-				app.cfg = config.DefaultConfig()
-			} else {
-				app.cfg = cfg
-			}
+			app.cfg = cfg
 		}
 
 		return nil
@@ -242,8 +232,8 @@ func (a *App) newEarthquakeCmd() *cobra.Command {
 		RunE:  a.runCountryEarthquakes,
 	}
 	countryCmd.Flags().String("country", "", "Country name to filter by")
-	countryCmd.Flags().String("start", "", "Start time (YYYY-MM-DD)")
-	countryCmd.Flags().String("end", "", "End time (YYYY-MM-DD)")
+	countryCmd.Flags().String("start", "", "Start time (YYYY-MM-DD) (default: 30 days ago)")
+	countryCmd.Flags().String("end", "", "End time (YYYY-MM-DD) (default: today)")
 	countryCmd.Flags().Float64("min-mag", 0.0, "Minimum magnitude")
 	countryCmd.Flags().Float64("max-mag", 10.0, "Maximum magnitude")
 	countryCmd.Flags().IntP("limit", "l", 1000, "Limit number of records")
@@ -573,20 +563,34 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 	country, _ := cmd.Flags().GetString("country")
 	startStr, _ := cmd.Flags().GetString("start")
 	endStr, _ := cmd.Flags().GetString("end")
-	minMag, _ := cmd.Flags().GetFloat64("min")
-	maxMag, _ := cmd.Flags().GetFloat64("max")
+	minMag, _ := cmd.Flags().GetFloat64("min-mag")
+	maxMag, _ := cmd.Flags().GetFloat64("max-mag")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
 	stdout, _ := cmd.Flags().GetBool("stdout")
 
-	startTime, err := time.Parse("2006-01-02", startStr)
-	if err != nil {
-		return fmt.Errorf("invalid start time format: %w", err)
+	// Set default values if start/end are not provided
+	var startTime, endTime time.Time
+	var err error
+
+	if startStr == "" {
+		// Default to 30 days ago
+		startTime = time.Now().AddDate(0, 0, -30)
+	} else {
+		startTime, err = time.Parse("2006-01-02", startStr)
+		if err != nil {
+			return fmt.Errorf("invalid start time format: %w", err)
+		}
 	}
 
-	endTime, err := time.Parse("2006-01-02", endStr)
-	if err != nil {
-		return fmt.Errorf("invalid end time format: %w", err)
+	if endStr == "" {
+		// Default to today
+		endTime = time.Now()
+	} else {
+		endTime, err = time.Parse("2006-01-02", endStr)
+		if err != nil {
+			return fmt.Errorf("invalid end time format: %w", err)
+		}
 	}
 
 	if limit == 0 {
@@ -596,7 +600,13 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	// Check for custom output directory flag
+	outputDir, _ := cmd.Flags().GetString("output-dir")
+	if outputDir == "" {
+		outputDir = a.cfg.Storage.OutputDir
+	}
+
+	store := storage.NewJSONStorage(outputDir)
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -1005,7 +1015,7 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 }
 
 func (a *App) runVersion(cmd *cobra.Command, args []string) {
-	fmt.Println("QuakeWatch Scraper v1.2.1")
+	fmt.Println("QuakeWatch Scraper v1.2.2")
 	fmt.Println("Go version: 1.24")
 	fmt.Println("Build date: " + time.Now().Format("2006-01-02"))
 }
@@ -1016,8 +1026,8 @@ func (a *App) runConfig(cmd *cobra.Command, args []string) error {
 	fmt.Println("QuakeWatch Scraper Configuration Setup")
 	fmt.Println("=====================================")
 
-	// Create configuration interactively
-	cfg, err := config.LoadConfig(configPath)
+	// Force interactive configuration creation
+	cfg, err := config.CreateInteractiveConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to create configuration: %w", err)
 	}
@@ -1068,7 +1078,7 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	fmt.Println("║  A powerful tool for collecting earthquake and fault data    ║")
 	fmt.Println("║  from various geological sources and APIs.                   ║")
 	fmt.Println("║                                                              ║")
-	fmt.Println("║  Version: 1.2.1                                              ║")
+	fmt.Println("║  Version: 1.2.2                                              ║")
 	fmt.Println("║  Built with Go                                               ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Println()

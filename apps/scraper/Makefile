@@ -6,13 +6,20 @@ build:
 	go build -o bin/quakewatch-scraper cmd/scraper/main.go
 
 # Build for multiple platforms
-build-all: build-linux build-darwin
+build-all: build-linux build-darwin build-windows
 
 build-linux:
 	GOOS=linux GOARCH=amd64 go build -o bin/quakewatch-scraper-linux-amd64 cmd/scraper/main.go
 
 build-darwin:
 	GOOS=darwin GOARCH=amd64 go build -o bin/quakewatch-scraper-darwin-amd64 cmd/scraper/main.go
+
+# Windows build targets
+build-windows:
+	GOOS=windows GOARCH=amd64 go build -o bin/quakewatch-scraper-windows-amd64.exe cmd/scraper/main.go
+
+build-windows-arm64:
+	GOOS=windows GOARCH=arm64 go build -o bin/quakewatch-scraper-windows-arm64.exe cmd/scraper/main.go
 
 
 
@@ -45,6 +52,10 @@ docs:
 # Create necessary directories
 setup:
 	mkdir -p bin data/earthquakes data/faults
+
+# Windows-specific setup
+setup-windows:
+	mkdir -p bin data\earthquakes data\faults
 
 # Quick test of the application
 test-app: build

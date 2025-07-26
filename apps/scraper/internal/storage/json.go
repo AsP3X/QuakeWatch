@@ -51,6 +51,8 @@ func (s *JSONStorage) SaveEarthquakes(ctx context.Context, earthquakes *models.U
 		return fmt.Errorf("failed to encode JSON: %w", err)
 	}
 
+	// Print the actual file path that was saved
+	fmt.Printf("Saved earthquakes to %s\n", filePath)
 	return nil
 }
 
