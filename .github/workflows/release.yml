@@ -1,9 +1,10 @@
-name: Build and Release
+name: Build and Release (Manual)
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Disabled automatic tag-based releases - use PR-based releases instead
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
 
 env:

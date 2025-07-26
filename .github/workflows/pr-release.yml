@@ -1,0 +1,275 @@
+name: PR Release Automation
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master, dev]
+
+env:
+  GO_VERSION: '1.24'
+
+jobs:
+  # Only run if PR was merged (not just closed)
+  check-merged:
+    name: Check if PR was merged
+    runs-on: ubuntu-latest
+    outputs:
+      merged: ${{ steps.check.outputs.merged }}
+      target-branch: ${{ steps.check.outputs.target-branch }}
+      pr-number: ${{ steps.check.outputs.pr-number }}
+    steps:
+      - name: Check if PR was merged
+        id: check
+        run: |
+          if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+            echo "merged=true" >> $GITHUB_OUTPUT
+            echo "target-branch=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+            echo "pr-number=${{ github.event.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "merged=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Extract version from the merged PR
+  extract-version:
+    name: Extract version from PR
+    runs-on: ubuntu-latest
+    needs: check-merged
+    if: needs.check-merged.outputs.merged == 'true'
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      release-type: ${{ steps.extract.outputs.release-type }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Extract version from code
+        id: extract
+        working-directory: apps/scraper
+        run: |
+          # Extract version from the version command output
+          VERSION=$(grep -o 'QuakeWatch Scraper v[0-9]\+\.[0-9]\+\.[0-9]\+' pkg/cli/commands.go | head -1 | sed 's/QuakeWatch Scraper v//')
+          
+          if [[ -z "$VERSION" ]]; then
+            echo "Error: Could not extract version from code"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Determine release type based on target branch
+          if [[ "${{ needs.check-merged.outputs.target-branch }}" == "master" ]]; then
+            echo "release-type=release" >> $GITHUB_OUTPUT
+          else
+            echo "release-type=dev-release" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Extracted version: $VERSION"
+          echo "Release type: ${{ steps.extract.outputs.release-type }}"
+
+  # Test the code before creating release
+  test:
+    name: Test and Build Verification
+    runs-on: ubuntu-latest
+    needs: [check-merged, extract-version]
+    if: needs.check-merged.outputs.merged == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Verify dependencies
+        working-directory: apps/scraper
+        run: go mod verify
+
+      - name: Tidy dependencies
+        working-directory: apps/scraper
+        run: go mod tidy
+
+      - name: Download dependencies
+        working-directory: apps/scraper
+        run: go mod download
+
+      - name: Run tests
+        working-directory: apps/scraper
+        run: go test -v ./...
+
+      - name: Build verification
+        working-directory: apps/scraper
+        run: go build -v ./...
+
+  # Build binaries for all platforms
+  build:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: [check-merged, extract-version, test]
+    if: needs.check-merged.outputs.merged == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            bin_name: quakewatch-scraper-linux-amd64
+          - os: linux
+            arch: arm64
+            bin_name: quakewatch-scraper-linux-arm64
+          - os: darwin
+            arch: amd64
+            bin_name: quakewatch-scraper-darwin-amd64
+          - os: darwin
+            arch: arm64
+            bin_name: quakewatch-scraper-darwin-arm64
+          - os: windows
+            arch: amd64
+            bin_name: quakewatch-scraper-windows-amd64.exe
+          - os: windows
+            arch: arm64
+            bin_name: quakewatch-scraper-windows-arm64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Verify dependencies
+        working-directory: apps/scraper
+        run: go mod verify
+
+      - name: Tidy dependencies
+        working-directory: apps/scraper
+        run: go mod tidy
+
+      - name: Download dependencies
+        working-directory: apps/scraper
+        run: go mod download
+
+      - name: Build binary
+        working-directory: apps/scraper
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o bin/${{ matrix.bin_name }} cmd/scraper/main.go
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin_name }}
+          path: apps/scraper/bin/${{ matrix.bin_name }}
+
+  # Create release based on target branch
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [check-merged, extract-version, build]
+    if: needs.check-merged.outputs.merged == 'true'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: List downloaded files
+        run: |
+          echo "Downloaded files:"
+          find dist/ -type f -name "*" | sort
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.extract-version.outputs.release-type == 'release' && format('v{0}', needs.extract-version.outputs.version) || format('dev-release-v{0}', needs.extract-version.outputs.version) }}
+          files: dist/**/*
+          draft: false
+          prerelease: ${{ needs.extract-version.outputs.release-type == 'dev-release' }}
+          generate_release_notes: true
+          title: ${{ needs.extract-version.outputs.release-type == 'release' && format('Release v{0}', needs.extract-version.outputs.version) || format('Development Release v{0}', needs.extract-version.outputs.version) }}
+          body: |
+            ## ${{ needs.extract-version.outputs.release-type == 'release' && format('Release v{0}', needs.extract-version.outputs.version) || format('Development Release v{0}', needs.extract-version.outputs.version) }}
+            
+            This ${{ needs.extract-version.outputs.release-type == 'release' && 'release' || 'development release' }} was automatically created from PR #${{ needs.check-merged.outputs.pr-number }} merged into the `${{ needs.check-merged.outputs.target-branch }}` branch.
+            
+            ### Changes
+            - Merged from PR #${{ needs.check-merged.outputs.pr-number }}
+            - Target branch: `${{ needs.check-merged.outputs.target-branch }}`
+            - Version: ${{ needs.extract-version.outputs.version }}
+            
+            ### Build Information
+            - Go version: ${{ env.GO_VERSION }}
+            - Build date: ${{ github.event.head_commit.timestamp }}
+            
+            ### Supported Platforms
+            - Linux (AMD64, ARM64)
+            - macOS (AMD64, ARM64)
+            - Windows (AMD64, ARM64)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Create Git tag for the release
+  create-tag:
+    name: Create Git Tag
+    runs-on: ubuntu-latest
+    needs: [check-merged, extract-version, create-release]
+    if: needs.check-merged.outputs.merged == 'true'
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push tag
+        run: |
+          TAG_NAME="${{ needs.extract-version.outputs.release-type == 'release' && format('v{0}', needs.extract-version.outputs.version) || format('dev-release-v{0}', needs.extract-version.outputs.version) }}"
+          echo "Creating tag: $TAG_NAME"
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          git tag -a "$TAG_NAME" -m "${{ needs.extract-version.outputs.release-type == 'release' && format('Release v{0}', needs.extract-version.outputs.version) || format('Development Release v{0}', needs.extract-version.outputs.version) }} - PR #${{ needs.check-merged.outputs.pr-number }}"
+          git push origin "$TAG_NAME" 
