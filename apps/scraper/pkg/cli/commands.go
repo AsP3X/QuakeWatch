@@ -1015,7 +1015,7 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 }
 
 func (a *App) runVersion(cmd *cobra.Command, args []string) {
-	fmt.Println("QuakeWatch Scraper v1.2.1")
+	fmt.Println("QuakeWatch Scraper v1.2.2")
 	fmt.Println("Go version: 1.24")
 	fmt.Println("Build date: " + time.Now().Format("2006-01-02"))
 }
@@ -1078,7 +1078,7 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	fmt.Println("║  A powerful tool for collecting earthquake and fault data    ║")
 	fmt.Println("║  from various geological sources and APIs.                   ║")
 	fmt.Println("║                                                              ║")
-	fmt.Println("║  Version: 1.2.1                                              ║")
+	fmt.Println("║  Version: 1.2.2                                              ║")
 	fmt.Println("║  Built with Go                                               ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Println()
