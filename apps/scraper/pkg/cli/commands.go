@@ -86,6 +86,27 @@ func NewApp() *App {
 	// Set the banner function for when no command is provided
 	app.rootCmd.Run = app.showBanner
 
+	// Create and set up the help command with flags
+	helpCmd := &cobra.Command{
+		Use:   "help",
+		Short: "Show comprehensive help and examples",
+		Long:  `Display comprehensive help information with examples, organized by category.`,
+		Run:   app.runHelp,
+	}
+
+	// Add flags to the help command
+	helpCmd.Flags().String("category", "all", "Help category (all, earthquakes, faults, interval, db, utils, examples)")
+	helpCmd.Flags().Bool("examples", false, "Show usage examples")
+	helpCmd.Flags().Bool("quick", false, "Show quick reference")
+
+	// Override the default help command with our custom version
+	app.rootCmd.SetHelpCommand(helpCmd)
+
+	// Set a custom help template for better formatting
+	app.rootCmd.SetHelpTemplate(`{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
+
+{{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}`)
+
 	return app
 }
 
@@ -1088,10 +1109,33 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
-	// Show the help after the banner
-	if err := cmd.Help(); err != nil {
-		fmt.Printf("Error showing help: %v\n", err)
-	}
+	// Show a more user-friendly help summary
+	fmt.Println("🚀 QUICK START")
+	fmt.Println("==============")
+	fmt.Println("  • Collect recent earthquakes: quakewatch-scraper earthquakes recent")
+	fmt.Println("  • Collect fault data: quakewatch-scraper faults collect")
+	fmt.Println("  • Check system health: quakewatch-scraper health")
+	fmt.Println()
+
+	fmt.Println("📚 COMMAND CATEGORIES")
+	fmt.Println("====================")
+	fmt.Println("  🌍 earthquakes    - Collect earthquake data from USGS")
+	fmt.Println("  🏔️  faults        - Collect fault data from EMSC")
+	fmt.Println("  ⏰ interval       - Run commands at regular intervals")
+	fmt.Println("  🗄️  db            - Manage database operations")
+	fmt.Println("  🛠️  utilities     - Data management and system tools")
+	fmt.Println()
+
+	fmt.Println("🔍 GETTING HELP")
+	fmt.Println("===============")
+	fmt.Println("  • Comprehensive help: quakewatch-scraper help")
+	fmt.Println("  • Quick reference: quakewatch-scraper help --quick")
+	fmt.Println("  • Examples: quakewatch-scraper help --examples")
+	fmt.Println("  • Category help: quakewatch-scraper help --category earthquakes")
+	fmt.Println()
+
+	fmt.Println("💡 For detailed help and examples, run: quakewatch-scraper help")
+	fmt.Println()
 }
 
 // newIntervalCmd creates the interval command
@@ -1901,3 +1945,505 @@ func (a *App) runDatabaseStatus(cmd *cobra.Command, args []string) error {
 }
 
 // getOutputDir returns the output directory, respecting both configuration and command flags
+
+// newHelpCmd creates a custom help command with better organization and examples
+func (a *App) newHelpCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "help",
+		Short: "Show comprehensive help and examples",
+		Long:  `Display comprehensive help information with examples, organized by category.`,
+		Run:   a.runHelp,
+	}
+
+	cmd.Flags().String("category", "all", "Help category (all, earthquakes, faults, interval, db, utils, examples)")
+	cmd.Flags().Bool("examples", false, "Show usage examples")
+	cmd.Flags().Bool("quick", false, "Show quick reference")
+
+	return cmd
+}
+
+// runHelp displays comprehensive help information
+func (a *App) runHelp(cmd *cobra.Command, args []string) {
+	category, _ := cmd.Flags().GetString("category")
+	showExamples, _ := cmd.Flags().GetBool("examples")
+	quickRef, _ := cmd.Flags().GetBool("quick")
+
+	if quickRef {
+		a.showQuickReference()
+		return
+	}
+
+	if showExamples {
+		a.showExamples()
+		return
+	}
+
+	switch category {
+	case "earthquakes":
+		a.showEarthquakeHelp()
+	case "faults":
+		a.showFaultHelp()
+	case "interval":
+		a.showIntervalHelp()
+	case "db":
+		a.showDatabaseHelp()
+	case "utils":
+		a.showUtilityHelp()
+	case "examples":
+		a.showExamples()
+	default:
+		a.showComprehensiveHelp()
+	}
+}
+
+// showComprehensiveHelp displays the main help screen
+func (a *App) showComprehensiveHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                  🌋 QuakeWatch Scraper Help 🌋              ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("📋 QUICK START")
+	fmt.Println("==============")
+	fmt.Println("  • Collect recent earthquakes: quakewatch-scraper earthquakes recent")
+	fmt.Println("  • Collect fault data: quakewatch-scraper faults collect")
+	fmt.Println("  • Check system health: quakewatch-scraper health")
+	fmt.Println("  • View examples: quakewatch-scraper help --examples")
+	fmt.Println()
+
+	fmt.Println("📚 COMMAND CATEGORIES")
+	fmt.Println("====================")
+	fmt.Println("  🌍 Earthquakes    - Collect earthquake data from USGS")
+	fmt.Println("  🏔️  Faults        - Collect fault data from EMSC")
+	fmt.Println("  ⏰ Interval       - Run commands at regular intervals")
+	fmt.Println("  🗄️  Database       - Manage database operations")
+	fmt.Println("  🛠️  Utilities      - Data management and system tools")
+	fmt.Println()
+
+	fmt.Println("🔍 GETTING HELP")
+	fmt.Println("===============")
+	fmt.Println("  • Main help: quakewatch-scraper help")
+	fmt.Println("  • Category help: quakewatch-scraper help --category earthquakes")
+	fmt.Println("  • Quick reference: quakewatch-scraper help --quick")
+	fmt.Println("  • Examples: quakewatch-scraper help --examples")
+	fmt.Println("  • Command help: quakewatch-scraper [command] --help")
+	fmt.Println()
+
+	fmt.Println("⚙️  GLOBAL OPTIONS")
+	fmt.Println("=================")
+	fmt.Println("  -c, --config <file>     Configuration file path")
+	fmt.Println("  -v, --verbose           Enable verbose logging")
+	fmt.Println("  -q, --quiet             Suppress output")
+	fmt.Println("  -o, --output-dir <dir>  Output directory for files")
+	fmt.Println("  --dry-run               Show what would be done")
+	fmt.Println("  --stdout                Output to stdout instead of file")
+	fmt.Println()
+
+	fmt.Println("📖 For detailed information about each category, use:")
+	fmt.Println("   quakewatch-scraper help --category <category>")
+	fmt.Println()
+	fmt.Println("💡 For practical examples, use:")
+	fmt.Println("   quakewatch-scraper help --examples")
+}
+
+// showQuickReference displays a quick reference guide
+func (a *App) showQuickReference() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                🚀 Quick Reference Guide 🚀                  ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("🌍 EARTHQUAKE COMMANDS")
+	fmt.Println("=====================")
+	fmt.Println("  recent                    # Last hour earthquakes")
+	fmt.Println("  time-range --start --end  # Time range collection")
+	fmt.Println("  magnitude --min --max     # Magnitude range")
+	fmt.Println("  significant --start --end # Significant earthquakes (M4.5+)")
+	fmt.Println("  region --min-lat --max-lat --min-lon --max-lon")
+	fmt.Println("  country --country         # Country-specific")
+	fmt.Println()
+
+	fmt.Println("🏔️  FAULT COMMANDS")
+	fmt.Println("==================")
+	fmt.Println("  collect                   # Collect fault data")
+	fmt.Println("  update                    # Update with retry logic")
+	fmt.Println()
+
+	fmt.Println("⏰ INTERVAL COMMANDS")
+	fmt.Println("===================")
+	fmt.Println("  earthquakes recent --interval 1h")
+	fmt.Println("  faults collect --interval 6h")
+	fmt.Println("  custom --commands 'cmd1,cmd2' --interval 30m")
+	fmt.Println()
+
+	fmt.Println("🗄️  DATABASE COMMANDS")
+	fmt.Println("====================")
+	fmt.Println("  init                      # Initialize database")
+	fmt.Println("  migrate up                # Run migrations")
+	fmt.Println("  migrate down              # Rollback migrations")
+	fmt.Println("  status                    # Check status")
+	fmt.Println()
+
+	fmt.Println("🛠️  UTILITY COMMANDS")
+	fmt.Println("====================")
+	fmt.Println("  health                    # System health check")
+	fmt.Println("  stats                     # Data statistics")
+	fmt.Println("  validate                  # Data validation")
+	fmt.Println("  list                      # List data files")
+	fmt.Println("  purge                     # Delete data files")
+	fmt.Println("  version                   # Version information")
+	fmt.Println()
+
+	fmt.Println("💡 COMMON FLAGS")
+	fmt.Println("===============")
+	fmt.Println("  --limit <number>          # Limit records")
+	fmt.Println("  --filename <name>         # Custom filename")
+	fmt.Println("  --storage <backend>       # Storage backend")
+	fmt.Println("  --smart                   # Smart collection")
+	fmt.Println()
+}
+
+// showExamples displays practical usage examples
+func (a *App) showExamples() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    📝 Usage Examples 📝                     ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("🌍 EARTHQUAKE EXAMPLES")
+	fmt.Println("======================")
+	fmt.Println("  # Collect recent earthquakes (last hour)")
+	fmt.Println("  quakewatch-scraper earthquakes recent")
+	fmt.Println()
+	fmt.Println("  # Collect earthquakes from last 24 hours")
+	fmt.Println("  quakewatch-scraper earthquakes recent --hours-back 24")
+	fmt.Println()
+	fmt.Println("  # Collect earthquakes by time range")
+	fmt.Println("  quakewatch-scraper earthquakes time-range \\")
+	fmt.Println("    --start '2024-01-01' \\")
+	fmt.Println("    --end '2024-01-31' \\")
+	fmt.Println("    --limit 500")
+	fmt.Println()
+	fmt.Println("  # Collect significant earthquakes")
+	fmt.Println("  quakewatch-scraper earthquakes significant \\")
+	fmt.Println("    --start '2024-01-01' \\")
+	fmt.Println("    --end '2024-01-31'")
+	fmt.Println()
+	fmt.Println("  # Collect earthquakes by magnitude")
+	fmt.Println("  quakewatch-scraper earthquakes magnitude \\")
+	fmt.Println("    --min 4.5 --max 10.0")
+	fmt.Println()
+	fmt.Println("  # Collect earthquakes in California region")
+	fmt.Println("  quakewatch-scraper earthquakes region \\")
+	fmt.Println("    --min-lat 32.0 --max-lat 42.0 \\")
+	fmt.Println("    --min-lon -125.0 --max-lon -114.0")
+	fmt.Println()
+
+	fmt.Println("🏔️  FAULT EXAMPLES")
+	fmt.Println("==================")
+	fmt.Println("  # Collect fault data")
+	fmt.Println("  quakewatch-scraper faults collect")
+	fmt.Println()
+	fmt.Println("  # Update fault data with retry")
+	fmt.Println("  quakewatch-scraper faults update --retries 5")
+	fmt.Println()
+
+	fmt.Println("⏰ INTERVAL EXAMPLES")
+	fmt.Println("===================")
+	fmt.Println("  # Collect earthquakes every hour")
+	fmt.Println("  quakewatch-scraper interval earthquakes recent \\")
+	fmt.Println("    --interval 1h --max-runtime 24h")
+	fmt.Println()
+	fmt.Println("  # Collect faults every 6 hours")
+	fmt.Println("  quakewatch-scraper interval faults collect \\")
+	fmt.Println("    --interval 6h --daemon")
+	fmt.Println()
+	fmt.Println("  # Custom interval with multiple commands")
+	fmt.Println("  quakewatch-scraper interval custom \\")
+	fmt.Println("    --commands 'earthquakes recent,faults collect' \\")
+	fmt.Println("    --interval 30m")
+	fmt.Println()
+
+	fmt.Println("🗄️  DATABASE EXAMPLES")
+	fmt.Println("====================")
+	fmt.Println("  # Initialize database")
+	fmt.Println("  quakewatch-scraper db init")
+	fmt.Println()
+	fmt.Println("  # Run migrations")
+	fmt.Println("  quakewatch-scraper db migrate up")
+	fmt.Println()
+	fmt.Println("  # Check database status")
+	fmt.Println("  quakewatch-scraper db status")
+	fmt.Println()
+
+	fmt.Println("🛠️  UTILITY EXAMPLES")
+	fmt.Println("====================")
+	fmt.Println("  # Check system health")
+	fmt.Println("  quakewatch-scraper health")
+	fmt.Println()
+	fmt.Println("  # View data statistics")
+	fmt.Println("  quakewatch-scraper stats --type earthquakes")
+	fmt.Println()
+	fmt.Println("  # Validate collected data")
+	fmt.Println("  quakewatch-scraper validate --type all")
+	fmt.Println()
+	fmt.Println("  # List all data files")
+	fmt.Println("  quakewatch-scraper list --type all")
+	fmt.Println()
+	fmt.Println("  # Purge old data (dry run first)")
+	fmt.Println("  quakewatch-scraper purge --dry-run")
+	fmt.Println("  quakewatch-scraper purge --force")
+	fmt.Println()
+
+	fmt.Println("⚙️  CONFIGURATION EXAMPLES")
+	fmt.Println("=========================")
+	fmt.Println("  # Use custom config file")
+	fmt.Println("  quakewatch-scraper earthquakes recent -c ./my-config.yaml")
+	fmt.Println()
+	fmt.Println("  # Enable verbose logging")
+	fmt.Println("  quakewatch-scraper earthquakes recent -v")
+	fmt.Println()
+	fmt.Println("  # Output to custom directory")
+	fmt.Println("  quakewatch-scraper earthquakes recent -o ./my-data")
+	fmt.Println()
+	fmt.Println("  # Output to stdout")
+	fmt.Println("  quakewatch-scraper earthquakes recent --stdout")
+	fmt.Println()
+}
+
+// showEarthquakeHelp displays earthquake-specific help
+func (a *App) showEarthquakeHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    🌍 Earthquake Commands 🌍                ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("OVERVIEW")
+	fmt.Println("=========")
+	fmt.Println("Collect earthquake data from the USGS FDSNWS API. All commands")
+	fmt.Println("support filtering, limiting, and custom output options.")
+	fmt.Println()
+
+	fmt.Println("COMMANDS")
+	fmt.Println("=========")
+	fmt.Println("  recent                    Collect recent earthquakes (last hour)")
+	fmt.Println("  time-range                Collect earthquakes by time range")
+	fmt.Println("  magnitude                 Collect earthquakes by magnitude range")
+	fmt.Println("  significant               Collect significant earthquakes (M4.5+)")
+	fmt.Println("  region                    Collect earthquakes by geographic region")
+	fmt.Println("  country                   Collect earthquakes by country")
+	fmt.Println()
+
+	fmt.Println("COMMON OPTIONS")
+	fmt.Println("==============")
+	fmt.Println("  --limit <number>          Maximum number of records (default: 1000)")
+	fmt.Println("  --filename <name>         Custom filename (without extension)")
+	fmt.Println("  --storage <backend>       Storage backend (json, postgresql)")
+	fmt.Println("  --smart                   Use smart collection to avoid duplicates")
+	fmt.Println("  --hours-back <number>     Hours to look back (recent command)")
+	fmt.Println()
+
+	fmt.Println("EXAMPLES")
+	fmt.Println("=========")
+	fmt.Println("  # Basic recent collection")
+	fmt.Println("  quakewatch-scraper earthquakes recent")
+	fmt.Println()
+	fmt.Println("  # Time range with limit")
+	fmt.Println("  quakewatch-scraper earthquakes time-range \\")
+	fmt.Println("    --start '2024-01-01' --end '2024-01-31' --limit 500")
+	fmt.Println()
+	fmt.Println("  # Magnitude filtering")
+	fmt.Println("  quakewatch-scraper earthquakes magnitude --min 4.5 --max 10.0")
+	fmt.Println()
+	fmt.Println("  # Geographic region")
+	fmt.Println("  quakewatch-scraper earthquakes region \\")
+	fmt.Println("    --min-lat 32.0 --max-lat 42.0 \\")
+	fmt.Println("    --min-lon -125.0 --max-lon -114.0")
+	fmt.Println()
+}
+
+// showFaultHelp displays fault-specific help
+func (a *App) showFaultHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    🏔️  Fault Commands 🏔️                   ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("OVERVIEW")
+	fmt.Println("=========")
+	fmt.Println("Collect fault data from the EMSC-CSEM API. Fault data includes")
+	fmt.Println("information about geological faults and their characteristics.")
+	fmt.Println()
+
+	fmt.Println("COMMANDS")
+	fmt.Println("=========")
+	fmt.Println("  collect                   Collect fault data from EMSC")
+	fmt.Println("  update                    Update fault data with retry logic")
+	fmt.Println()
+
+	fmt.Println("COMMON OPTIONS")
+	fmt.Println("==============")
+	fmt.Println("  --filename <name>         Custom filename (without extension)")
+	fmt.Println("  --retries <number>        Number of retry attempts (update)")
+	fmt.Println("  --retry-delay <duration>  Delay between retries (update)")
+	fmt.Println()
+
+	fmt.Println("EXAMPLES")
+	fmt.Println("=========")
+	fmt.Println("  # Basic fault collection")
+	fmt.Println("  quakewatch-scraper faults collect")
+	fmt.Println()
+	fmt.Println("  # Update with retry")
+	fmt.Println("  quakewatch-scraper faults update --retries 5")
+	fmt.Println()
+}
+
+// showIntervalHelp displays interval-specific help
+func (a *App) showIntervalHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    ⏰ Interval Commands ⏰                   ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("OVERVIEW")
+	fmt.Println("=========")
+	fmt.Println("Run data collection commands at regular intervals. Supports")
+	fmt.Println("various scheduling options, error handling, and daemon mode.")
+	fmt.Println()
+
+	fmt.Println("COMMANDS")
+	fmt.Println("=========")
+	fmt.Println("  earthquakes recent        Run recent earthquake collection")
+	fmt.Println("  earthquakes time-range    Run time range earthquake collection")
+	fmt.Println("  earthquakes magnitude     Run magnitude earthquake collection")
+	fmt.Println("  earthquakes significant   Run significant earthquake collection")
+	fmt.Println("  earthquakes region        Run region earthquake collection")
+	fmt.Println("  earthquakes country       Run country earthquake collection")
+	fmt.Println("  faults collect            Run fault collection")
+	fmt.Println("  faults update             Run fault update")
+	fmt.Println("  custom                    Run custom command combinations")
+	fmt.Println()
+
+	fmt.Println("INTERVAL OPTIONS")
+	fmt.Println("================")
+	fmt.Println("  --interval <duration>     Time interval (e.g., '5m', '1h', '24h')")
+	fmt.Println("  --max-runtime <duration>  Maximum total runtime")
+	fmt.Println("  --max-executions <number> Maximum number of executions")
+	fmt.Println("  --backoff <strategy>      Backoff strategy (none, linear, exponential)")
+	fmt.Println("  --max-backoff <duration>  Maximum backoff duration")
+	fmt.Println("  --continue-on-error       Continue on individual failures")
+	fmt.Println("  --skip-empty              Skip if no new data found")
+	fmt.Println("  --daemon                  Run in background mode")
+	fmt.Println("  --pid-file <path>         PID file location")
+	fmt.Println("  --log-file <path>         Log file for daemon mode")
+	fmt.Println()
+
+	fmt.Println("EXAMPLES")
+	fmt.Println("=========")
+	fmt.Println("  # Collect earthquakes every hour")
+	fmt.Println("  quakewatch-scraper interval earthquakes recent --interval 1h")
+	fmt.Println()
+	fmt.Println("  # Run as daemon with max runtime")
+	fmt.Println("  quakewatch-scraper interval earthquakes recent \\")
+	fmt.Println("    --interval 30m --max-runtime 24h --daemon")
+	fmt.Println()
+	fmt.Println("  # Custom commands every 15 minutes")
+	fmt.Println("  quakewatch-scraper interval custom \\")
+	fmt.Println("    --commands 'earthquakes recent,faults collect' \\")
+	fmt.Println("    --interval 15m")
+	fmt.Println()
+}
+
+// showDatabaseHelp displays database-specific help
+func (a *App) showDatabaseHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    🗄️  Database Commands 🗄️                 ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("OVERVIEW")
+	fmt.Println("=========")
+	fmt.Println("Manage PostgreSQL database operations including initialization,")
+	fmt.Println("migrations, and status monitoring.")
+	fmt.Println()
+
+	fmt.Println("COMMANDS")
+	fmt.Println("=========")
+	fmt.Println("  init                      Initialize database and run migrations")
+	fmt.Println("  migrate up                Run all pending migrations")
+	fmt.Println("  migrate down              Rollback all migrations")
+	fmt.Println("  migrate to                Migrate to specific version")
+	fmt.Println("  migrate force             Force migration version")
+	fmt.Println("  status                    Show database status and migration info")
+	fmt.Println()
+
+	fmt.Println("COMMON OPTIONS")
+	fmt.Println("==============")
+	fmt.Println("  --force                   Force operations (init)")
+	fmt.Println("  --version <number>        Target migration version")
+	fmt.Println()
+
+	fmt.Println("EXAMPLES")
+	fmt.Println("=========")
+	fmt.Println("  # Initialize database")
+	fmt.Println("  quakewatch-scraper db init")
+	fmt.Println()
+	fmt.Println("  # Run migrations")
+	fmt.Println("  quakewatch-scraper db migrate up")
+	fmt.Println()
+	fmt.Println("  # Check status")
+	fmt.Println("  quakewatch-scraper db status")
+	fmt.Println()
+}
+
+// showUtilityHelp displays utility-specific help
+func (a *App) showUtilityHelp() {
+	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                    🛠️  Utility Commands 🛠️                 ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════════╝")
+	fmt.Println()
+
+	fmt.Println("OVERVIEW")
+	fmt.Println("=========")
+	fmt.Println("Utility commands for data management, system monitoring, and")
+	fmt.Println("application maintenance.")
+	fmt.Println()
+
+	fmt.Println("COMMANDS")
+	fmt.Println("=========")
+	fmt.Println("  health                    Check system and API health")
+	fmt.Println("  stats                     Show data collection statistics")
+	fmt.Println("  validate                  Validate data integrity")
+	fmt.Println("  list                      List available data files")
+	fmt.Println("  purge                     Delete collected data files")
+	fmt.Println("  version                   Show version information")
+	fmt.Println("  config                    Manage application configuration")
+	fmt.Println()
+
+	fmt.Println("COMMON OPTIONS")
+	fmt.Println("==============")
+	fmt.Println("  --type <type>             Data type (earthquakes, faults, all)")
+	fmt.Println("  --file <path>             Specific file to process")
+	fmt.Println("  --force                   Force operations without confirmation")
+	fmt.Println("  --dry-run                 Show what would be done")
+	fmt.Println()
+
+	fmt.Println("EXAMPLES")
+	fmt.Println("=========")
+	fmt.Println("  # Check system health")
+	fmt.Println("  quakewatch-scraper health")
+	fmt.Println()
+	fmt.Println("  # View statistics")
+	fmt.Println("  quakewatch-scraper stats --type earthquakes")
+	fmt.Println()
+	fmt.Println("  # Validate data")
+	fmt.Println("  quakewatch-scraper validate --type all")
+	fmt.Println()
+	fmt.Println("  # List files")
+	fmt.Println("  quakewatch-scraper list --type all")
+	fmt.Println()
+	fmt.Println("  # Purge with confirmation")
+	fmt.Println("  quakewatch-scraper purge --dry-run")
+	fmt.Println("  quakewatch-scraper purge --force")
+	fmt.Println()
+}
