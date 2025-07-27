@@ -21,6 +21,8 @@ type Config struct {
 	Collection CollectionConfig `mapstructure:"collection"`
 	Database   DatabaseConfig   `mapstructure:"database"`
 	Interval   IntervalConfig   `mapstructure:"interval"`
+	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+	Resilience ResilienceConfig `mapstructure:"resilience"`
 }
 
 // APIConfig contains API-related configuration
@@ -64,6 +66,29 @@ type CollectionConfig struct {
 	RetryDelay    time.Duration `mapstructure:"retry_delay"`
 }
 
+// MonitoringConfig contains monitoring and observability configuration
+type MonitoringConfig struct {
+	Enabled           bool          `mapstructure:"enabled"`
+	MetricsPort       int           `mapstructure:"metrics_port"`
+	HealthCheckPort   int           `mapstructure:"health_check_port"`
+	MetricsPath       string        `mapstructure:"metrics_path"`
+	HealthCheckPath   string        `mapstructure:"health_check_path"`
+	CollectionTimeout time.Duration `mapstructure:"collection_timeout"`
+}
+
+// ResilienceConfig contains resilience and error handling configuration
+type ResilienceConfig struct {
+	CircuitBreakerThreshold        int           `mapstructure:"circuit_breaker_threshold"`
+	CircuitBreakerTimeout          time.Duration `mapstructure:"circuit_breaker_timeout"`
+	CircuitBreakerSuccessThreshold int           `mapstructure:"circuit_breaker_success_threshold"`
+	RetryMaxAttempts               int           `mapstructure:"retry_max_attempts"`
+	RetryInitialDelay              time.Duration `mapstructure:"retry_initial_delay"`
+	RetryMaxDelay                  time.Duration `mapstructure:"retry_max_delay"`
+	RetryBackoffMultiplier         float64       `mapstructure:"retry_backoff_multiplier"`
+	RetryJitter                    bool          `mapstructure:"retry_jitter"`
+	RateLimitPerMinute             int           `mapstructure:"rate_limit_per_minute"`
+}
+
 // IntervalConfig contains interval scraping configuration
 type IntervalConfig struct {
 	DefaultInterval     time.Duration `mapstructure:"default_interval"`
@@ -102,30 +127,22 @@ func DefaultConfig() *Config {
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
-			Format: "json",
+			Format: "console",
 			Output: "stdout",
 		},
 		Collection: CollectionConfig{
 			DefaultLimit:  1000,
 			MaxLimit:      10000,
 			RetryAttempts: 3,
-			RetryDelay:    5 * time.Second,
+			RetryDelay:    1 * time.Second,
 		},
 		Database: DatabaseConfig{
-			Enabled:           false,
-			Type:              "postgres",
-			Host:              "localhost",
-			Port:              5432,
-			User:              "postgres",
-			Password:          "",
-			Database:          "quakewatch",
-			SSLMode:           "disable",
-			MaxOpenConns:      25,
-			MaxIdleConns:      5,
-			ConnMaxLifetime:   5 * time.Minute,
-			ConnMaxIdleTime:   5 * time.Minute,
-			MaxConnections:    10,
-			ConnectionTimeout: 30 * time.Second,
+			Host:     "localhost",
+			Port:     5432,
+			User:     "quakewatch",
+			Password: "quakewatch",
+			Database: "quakewatch",
+			SSLMode:  "disable",
 		},
 		Interval: IntervalConfig{
 			DefaultInterval:     1 * time.Hour,
@@ -137,8 +154,27 @@ func DefaultConfig() *Config {
 			SkipEmpty:           false,
 			HealthCheckInterval: 5 * time.Minute,
 			DaemonMode:          false,
-			PIDFile:             pathManager.GetDefaultPIDFile(),
-			LogFile:             pathManager.GetDefaultLogFile(),
+			PIDFile:             "./quakewatch-scraper.pid",
+			LogFile:             "./logs/interval.log",
+		},
+		Monitoring: MonitoringConfig{
+			Enabled:           true,
+			MetricsPort:       9090,
+			HealthCheckPort:   8080,
+			MetricsPath:       "/metrics",
+			HealthCheckPath:   "/health",
+			CollectionTimeout: 5 * time.Minute,
+		},
+		Resilience: ResilienceConfig{
+			CircuitBreakerThreshold:        5,
+			CircuitBreakerTimeout:          30 * time.Second,
+			CircuitBreakerSuccessThreshold: 3,
+			RetryMaxAttempts:               3,
+			RetryInitialDelay:              1 * time.Second,
+			RetryMaxDelay:                  30 * time.Second,
+			RetryBackoffMultiplier:         2.0,
+			RetryJitter:                    true,
+			RateLimitPerMinute:             60,
 		},
 	}
 }
@@ -429,6 +465,124 @@ func CreateInteractiveConfig(configPath string) (*Config, error) {
 		}
 	}
 
+	// Monitoring Configuration
+	fmt.Println("\n--- Monitoring Configuration ---")
+
+	fmt.Printf("Monitoring Enabled (default: %t): ", config.Monitoring.Enabled)
+	var monitoringEnabled bool
+	fmt.Scanln(&monitoringEnabled)
+	if monitoringEnabled != config.Monitoring.Enabled {
+		config.Monitoring.Enabled = monitoringEnabled
+	}
+
+	if config.Monitoring.Enabled {
+		fmt.Printf("Metrics Port (default: %d): ", config.Monitoring.MetricsPort)
+		var metricsPort int
+		fmt.Scanln(&metricsPort)
+		if metricsPort > 0 {
+			config.Monitoring.MetricsPort = metricsPort
+		}
+
+		fmt.Printf("Health Check Port (default: %d): ", config.Monitoring.HealthCheckPort)
+		var healthCheckPort int
+		fmt.Scanln(&healthCheckPort)
+		if healthCheckPort > 0 {
+			config.Monitoring.HealthCheckPort = healthCheckPort
+		}
+
+		fmt.Printf("Metrics Path (default: %s): ", config.Monitoring.MetricsPath)
+		var metricsPath string
+		fmt.Scanln(&metricsPath)
+		if metricsPath != "" {
+			config.Monitoring.MetricsPath = metricsPath
+		}
+
+		fmt.Printf("Health Check Path (default: %s): ", config.Monitoring.HealthCheckPath)
+		var healthCheckPath string
+		fmt.Scanln(&healthCheckPath)
+		if healthCheckPath != "" {
+			config.Monitoring.HealthCheckPath = healthCheckPath
+		}
+
+		fmt.Printf("Collection Timeout in seconds (default: %.0f): ", config.Monitoring.CollectionTimeout.Seconds())
+		var collectionTimeout int
+		fmt.Scanln(&collectionTimeout)
+		if collectionTimeout > 0 {
+			config.Monitoring.CollectionTimeout = time.Duration(collectionTimeout) * time.Second
+		}
+	}
+
+	// Resilience Configuration
+	fmt.Println("\n--- Resilience Configuration ---")
+
+	fmt.Printf("Circuit Breaker Enabled (default: %t): ", config.Resilience.CircuitBreakerThreshold > 0)
+	var circuitBreakerEnabled bool
+	fmt.Scanln(&circuitBreakerEnabled)
+	if circuitBreakerEnabled {
+		fmt.Printf("Circuit Breaker Threshold (default: %d): ", config.Resilience.CircuitBreakerThreshold)
+		var circuitBreakerThreshold int
+		fmt.Scanln(&circuitBreakerThreshold)
+		if circuitBreakerThreshold > 0 {
+			config.Resilience.CircuitBreakerThreshold = circuitBreakerThreshold
+		}
+
+		fmt.Printf("Circuit Breaker Timeout in seconds (default: %.0f): ", config.Resilience.CircuitBreakerTimeout.Seconds())
+		var circuitBreakerTimeout int
+		fmt.Scanln(&circuitBreakerTimeout)
+		if circuitBreakerTimeout > 0 {
+			config.Resilience.CircuitBreakerTimeout = time.Duration(circuitBreakerTimeout) * time.Second
+		}
+
+		fmt.Printf("Circuit Breaker Success Threshold (default: %d): ", config.Resilience.CircuitBreakerSuccessThreshold)
+		var circuitBreakerSuccessThreshold int
+		fmt.Scanln(&circuitBreakerSuccessThreshold)
+		if circuitBreakerSuccessThreshold > 0 {
+			config.Resilience.CircuitBreakerSuccessThreshold = circuitBreakerSuccessThreshold
+		}
+	}
+
+	fmt.Printf("Retry Max Attempts (default: %d): ", config.Resilience.RetryMaxAttempts)
+	var retryMaxAttempts int
+	fmt.Scanln(&retryMaxAttempts)
+	if retryMaxAttempts > 0 {
+		config.Resilience.RetryMaxAttempts = retryMaxAttempts
+	}
+
+	fmt.Printf("Retry Initial Delay in seconds (default: %.0f): ", config.Resilience.RetryInitialDelay.Seconds())
+	var retryInitialDelay int
+	fmt.Scanln(&retryInitialDelay)
+	if retryInitialDelay > 0 {
+		config.Resilience.RetryInitialDelay = time.Duration(retryInitialDelay) * time.Second
+	}
+
+	fmt.Printf("Retry Max Delay in seconds (default: %.0f): ", config.Resilience.RetryMaxDelay.Seconds())
+	var retryMaxDelay int
+	fmt.Scanln(&retryMaxDelay)
+	if retryMaxDelay > 0 {
+		config.Resilience.RetryMaxDelay = time.Duration(retryMaxDelay) * time.Second
+	}
+
+	fmt.Printf("Retry Backoff Multiplier (default: %.2f): ", config.Resilience.RetryBackoffMultiplier)
+	var retryBackoffMultiplier float64
+	fmt.Scanln(&retryBackoffMultiplier)
+	if retryBackoffMultiplier > 0 {
+		config.Resilience.RetryBackoffMultiplier = retryBackoffMultiplier
+	}
+
+	fmt.Printf("Retry Jitter (default: %t): ", config.Resilience.RetryJitter)
+	var retryJitter bool
+	fmt.Scanln(&retryJitter)
+	if retryJitter != config.Resilience.RetryJitter {
+		config.Resilience.RetryJitter = retryJitter
+	}
+
+	fmt.Printf("Rate Limit Per Minute (default: %d): ", config.Resilience.RateLimitPerMinute)
+	var rateLimitPerMinute int
+	fmt.Scanln(&rateLimitPerMinute)
+	if rateLimitPerMinute > 0 {
+		config.Resilience.RateLimitPerMinute = rateLimitPerMinute
+	}
+
 	// Save the configuration
 	if err := SaveConfig(config, configPath); err != nil {
 		return nil, fmt.Errorf("failed to save configuration: %w", err)
@@ -481,6 +635,23 @@ func SaveConfig(config *Config, configPath string) error {
 	viper.Set("database.ssl_mode", config.Database.SSLMode)
 	viper.Set("database.max_connections", config.Database.MaxConnections)
 	viper.Set("database.connection_timeout", config.Database.ConnectionTimeout)
+
+	viper.Set("monitoring.enabled", config.Monitoring.Enabled)
+	viper.Set("monitoring.metrics_port", config.Monitoring.MetricsPort)
+	viper.Set("monitoring.health_check_port", config.Monitoring.HealthCheckPort)
+	viper.Set("monitoring.metrics_path", config.Monitoring.MetricsPath)
+	viper.Set("monitoring.health_check_path", config.Monitoring.HealthCheckPath)
+	viper.Set("monitoring.collection_timeout", config.Monitoring.CollectionTimeout)
+
+	viper.Set("resilience.circuit_breaker_threshold", config.Resilience.CircuitBreakerThreshold)
+	viper.Set("resilience.circuit_breaker_timeout", config.Resilience.CircuitBreakerTimeout)
+	viper.Set("resilience.circuit_breaker_success_threshold", config.Resilience.CircuitBreakerSuccessThreshold)
+	viper.Set("resilience.retry_max_attempts", config.Resilience.RetryMaxAttempts)
+	viper.Set("resilience.retry_initial_delay", config.Resilience.RetryInitialDelay)
+	viper.Set("resilience.retry_max_delay", config.Resilience.RetryMaxDelay)
+	viper.Set("resilience.retry_backoff_multiplier", config.Resilience.RetryBackoffMultiplier)
+	viper.Set("resilience.retry_jitter", config.Resilience.RetryJitter)
+	viper.Set("resilience.rate_limit_per_minute", config.Resilience.RateLimitPerMinute)
 
 	// Ensure the directory exists
 	configDir := filepath.Dir(getConfigPath(configPath))

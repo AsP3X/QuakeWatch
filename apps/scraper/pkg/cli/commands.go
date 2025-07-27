@@ -22,6 +22,7 @@ import (
 	"quakewatch-scraper/internal/config"
 	sched "quakewatch-scraper/internal/scheduler"
 	"quakewatch-scraper/internal/storage"
+	"quakewatch-scraper/internal/utils"
 )
 
 // App represents the main CLI application
@@ -94,10 +95,10 @@ func NewApp() *App {
 		Run:   app.runHelp,
 	}
 
-	// Add flags to the help command
-	helpCmd.Flags().String("category", "all", "Help category (all, earthquakes, faults, interval, db, utils, examples)")
-	helpCmd.Flags().Bool("examples", false, "Show usage examples")
-	helpCmd.Flags().Bool("quick", false, "Show quick reference")
+	// Add flags to the help command - using different names to avoid conflicts
+	helpCmd.Flags().String("help-category", "all", "Help category (all, earthquakes, faults, interval, db, utils, examples)")
+	helpCmd.Flags().Bool("help-examples", false, "Show usage examples")
+	helpCmd.Flags().Bool("help-quick", false, "Show quick reference")
 
 	// Override the default help command with our custom version
 	app.rootCmd.SetHelpCommand(helpCmd)
@@ -392,61 +393,38 @@ func (a *App) newConfigCmd() *cobra.Command {
 // Helper methods for command execution
 func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 	limit, _ := cmd.Flags().GetInt("limit")
-	stdout, _ := cmd.Flags().GetBool("stdout")
+	filename, _ := cmd.Flags().GetString("filename")
 	smart, _ := cmd.Flags().GetBool("smart")
-	storageType, _ := cmd.Flags().GetString("storage")
-	hoursBack, _ := cmd.Flags().GetInt("hours-back")
 
-	if limit == 0 {
-		limit = a.cfg.Collection.DefaultLimit
-	}
-	if limit > a.cfg.Collection.MaxLimit {
-		limit = a.cfg.Collection.MaxLimit
-	}
+	// Initialize storage - for now just use JSON storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
 
-	var store storage.Storage
-	if storageType == "postgresql" {
-		dbConfig := config.NewDatabaseConfig()
-		pgStore, err := storage.NewPostgreSQLStorage(dbConfig)
-		if err != nil {
-			return fmt.Errorf("failed to initialize PostgreSQL storage: %w", err)
-		}
-		store = pgStore
-		defer store.Close()
-	} else {
-		jsonStore := storage.NewJSONStorage(a.getOutputDir(cmd))
-		store = jsonStore
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, nil)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
+
 	ctx := context.Background()
 
 	if smart {
-		return collector.CollectRecentEarthquakesSmart(ctx, store)
-	}
-
-	if stdout {
-		earthquakes, err := collector.CollectRecentData(limit)
-		if err != nil {
-			return err
+		// Use smart collection to avoid duplicates
+		if err := collector.CollectRecentEarthquakesSmart(ctx, jsonStorage); err != nil {
+			return fmt.Errorf("smart collection failed: %w", err)
 		}
-		return a.outputToStdout(earthquakes)
-	}
-
-	if hoursBack > 1 {
-		earthquakes, err := collector.CollectRecentEarthquakes(ctx, hoursBack)
-		if err != nil {
-			return err
+	} else {
+		// Use regular collection
+		if err := collector.CollectRecent(ctx, limit, filename); err != nil {
+			return fmt.Errorf("collection failed: %w", err)
 		}
-		return store.SaveEarthquakes(ctx, earthquakes)
 	}
 
-	earthquakes, err := collector.CollectRecentData(limit)
-	if err != nil {
-		return err
-	}
-	return store.SaveEarthquakes(ctx, earthquakes)
+	return nil
 }
 
 func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
@@ -454,39 +432,37 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 	endStr, _ := cmd.Flags().GetString("end")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
-	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	startTime, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
-		return fmt.Errorf("invalid start time format: %w", err)
+		return fmt.Errorf("invalid start date format: %w", err)
 	}
 
 	endTime, err := time.Parse("2006-01-02", endStr)
 	if err != nil {
-		return fmt.Errorf("invalid end time format: %w", err)
+		return fmt.Errorf("invalid end date format: %w", err)
 	}
 
-	if limit == 0 {
-		limit = a.cfg.Collection.DefaultLimit
-	}
-	if limit > a.cfg.Collection.MaxLimit {
-		limit = a.cfg.Collection.MaxLimit
+	// Initialize storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
+
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	store := storage.NewJSONStorage(a.getOutputDir(cmd))
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
+
 	ctx := context.Background()
-
-	if stdout {
-		earthquakes, err := collector.CollectByTimeRangeData(startTime, endTime, limit)
-		if err != nil {
-			return err
-		}
-		return a.outputToStdout(earthquakes)
+	if err := collector.CollectByTimeRange(ctx, startTime, endTime, limit, filename); err != nil {
+		return fmt.Errorf("collection failed: %w", err)
 	}
 
-	return collector.CollectByTimeRange(ctx, startTime, endTime, limit, filename)
+	return nil
 }
 
 func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
@@ -494,29 +470,27 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 	maxMag, _ := cmd.Flags().GetFloat64("max")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
-	stdout, _ := cmd.Flags().GetBool("stdout")
 
-	if limit == 0 {
-		limit = a.cfg.Collection.DefaultLimit
-	}
-	if limit > a.cfg.Collection.MaxLimit {
-		limit = a.cfg.Collection.MaxLimit
+	// Initialize storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
+
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	store := storage.NewJSONStorage(a.getOutputDir(cmd))
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
+
 	ctx := context.Background()
-
-	if stdout {
-		earthquakes, err := collector.CollectByMagnitudeData(minMag, maxMag, limit)
-		if err != nil {
-			return err
-		}
-		return a.outputToStdout(earthquakes)
+	if err := collector.CollectByMagnitude(ctx, minMag, maxMag, limit, filename); err != nil {
+		return fmt.Errorf("collection failed: %w", err)
 	}
 
-	return collector.CollectByMagnitude(ctx, minMag, maxMag, limit, filename)
+	return nil
 }
 
 func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error {
@@ -524,39 +498,37 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 	endStr, _ := cmd.Flags().GetString("end")
 	limit, _ := cmd.Flags().GetInt("limit")
 	filename, _ := cmd.Flags().GetString("filename")
-	stdout, _ := cmd.Flags().GetBool("stdout")
 
 	startTime, err := time.Parse("2006-01-02", startStr)
 	if err != nil {
-		return fmt.Errorf("invalid start time format: %w", err)
+		return fmt.Errorf("invalid start date format: %w", err)
 	}
 
 	endTime, err := time.Parse("2006-01-02", endStr)
 	if err != nil {
-		return fmt.Errorf("invalid end time format: %w", err)
+		return fmt.Errorf("invalid end date format: %w", err)
 	}
 
-	if limit == 0 {
-		limit = a.cfg.Collection.DefaultLimit
-	}
-	if limit > a.cfg.Collection.MaxLimit {
-		limit = a.cfg.Collection.MaxLimit
+	// Initialize storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
+
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	store := storage.NewJSONStorage(a.getOutputDir(cmd))
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
+
 	ctx := context.Background()
-
-	if stdout {
-		earthquakes, err := collector.CollectSignificantData(startTime, endTime, limit)
-		if err != nil {
-			return err
-		}
-		return a.outputToStdout(earthquakes)
+	if err := collector.CollectSignificant(ctx, startTime, endTime, limit, filename); err != nil {
+		return fmt.Errorf("collection failed: %w", err)
 	}
 
-	return collector.CollectSignificant(ctx, startTime, endTime, limit, filename)
+	return nil
 }
 
 func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
@@ -575,13 +547,23 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.getOutputDir(cmd))
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	// Initialize storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
+
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
 	ctx := context.Background()
 
 	if stdout {
-		earthquakes, err := collector.CollectByRegionData(minLat, maxLat, minLon, maxLon, limit)
+		earthquakes, err := collector.CollectByRegionData(ctx, minLat, maxLat, minLon, maxLon, limit)
 		if err != nil {
 			return err
 		}
@@ -632,13 +614,23 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.getOutputDir(cmd))
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
-	collector := collector.NewEarthquakeCollector(usgsClient, store)
+	// Initialize storage
+	outputDir := a.getOutputDir(cmd)
+	jsonStorage := storage.NewJSONStorage(outputDir)
+
+	// Initialize API client with enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout, metrics, logger)
+	collector := collector.NewEarthquakeCollector(usgsClient, jsonStorage)
 	ctx := context.Background()
 
 	if stdout {
-		earthquakes, err := collector.CollectByCountryData(country, startTime, endTime, minMag, maxMag, limit)
+		earthquakes, err := collector.CollectByCountryData(ctx, country, startTime, endTime, minMag, maxMag, limit)
 		if err != nil {
 			return err
 		}
@@ -999,9 +991,17 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	fmt.Println("System Health Check:")
 
+	// Initialize enhanced features
+	metrics := utils.NewCollectionMetrics()
+	logger, err := utils.NewStructuredLogger(a.cfg.Logging.Level, a.cfg.Logging.Format)
+	if err != nil {
+		return fmt.Errorf("failed to initialize logger: %w", err)
+	}
+
 	// Check USGS API
-	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, 10*time.Second)
-	_, err := usgsClient.GetRecentEarthquakes(1)
+	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, 10*time.Second, metrics, logger)
+	ctx := context.Background()
+	_, err = usgsClient.GetRecentEarthquakes(ctx, 1)
 	if err != nil {
 		fmt.Printf("  ✗ USGS API: %v\n", err)
 	} else {
@@ -1128,10 +1128,11 @@ func (a *App) showBanner(cmd *cobra.Command, args []string) {
 
 	fmt.Println("🔍 GETTING HELP")
 	fmt.Println("===============")
-	fmt.Println("  • Comprehensive help: quakewatch-scraper help")
-	fmt.Println("  • Quick reference: quakewatch-scraper help --quick")
-	fmt.Println("  • Examples: quakewatch-scraper help --examples")
-	fmt.Println("  • Category help: quakewatch-scraper help --category earthquakes")
+	fmt.Println("  • Main help: quakewatch-scraper help")
+	fmt.Println("  • Category help: quakewatch-scraper help --help-category earthquakes")
+	fmt.Println("  • Quick reference: quakewatch-scraper help --help-quick")
+	fmt.Println("  • Examples: quakewatch-scraper help --help-examples")
+	fmt.Println("  • Command help: quakewatch-scraper [command] --help")
 	fmt.Println()
 
 	fmt.Println("💡 For detailed help and examples, run: quakewatch-scraper help")
@@ -1964,9 +1965,9 @@ func (a *App) newHelpCmd() *cobra.Command {
 
 // runHelp displays comprehensive help information
 func (a *App) runHelp(cmd *cobra.Command, args []string) {
-	category, _ := cmd.Flags().GetString("category")
-	showExamples, _ := cmd.Flags().GetBool("examples")
-	quickRef, _ := cmd.Flags().GetBool("quick")
+	category, _ := cmd.Flags().GetString("help-category")
+	showExamples, _ := cmd.Flags().GetBool("help-examples")
+	quickRef, _ := cmd.Flags().GetBool("help-quick")
 
 	if quickRef {
 		a.showQuickReference()
@@ -2023,9 +2024,9 @@ func (a *App) showComprehensiveHelp() {
 	fmt.Println("🔍 GETTING HELP")
 	fmt.Println("===============")
 	fmt.Println("  • Main help: quakewatch-scraper help")
-	fmt.Println("  • Category help: quakewatch-scraper help --category earthquakes")
-	fmt.Println("  • Quick reference: quakewatch-scraper help --quick")
-	fmt.Println("  • Examples: quakewatch-scraper help --examples")
+	fmt.Println("  • Category help: quakewatch-scraper help --help-category earthquakes")
+	fmt.Println("  • Quick reference: quakewatch-scraper help --help-quick")
+	fmt.Println("  • Examples: quakewatch-scraper help --help-examples")
 	fmt.Println("  • Command help: quakewatch-scraper [command] --help")
 	fmt.Println()
 
@@ -2040,10 +2041,10 @@ func (a *App) showComprehensiveHelp() {
 	fmt.Println()
 
 	fmt.Println("📖 For detailed information about each category, use:")
-	fmt.Println("   quakewatch-scraper help --category <category>")
+	fmt.Println("   quakewatch-scraper help --help-category <category>")
 	fmt.Println()
 	fmt.Println("💡 For practical examples, use:")
-	fmt.Println("   quakewatch-scraper help --examples")
+	fmt.Println("   quakewatch-scraper help --help-examples")
 }
 
 // showQuickReference displays a quick reference guide

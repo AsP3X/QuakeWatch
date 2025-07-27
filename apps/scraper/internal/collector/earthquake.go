@@ -29,7 +29,7 @@ func NewEarthquakeCollector(usgsClient *api.USGSClient, storage *storage.JSONSto
 func (c *EarthquakeCollector) CollectRecent(ctx context.Context, limit int, filename string) error {
 	fmt.Printf("Collecting recent earthquakes (last hour, limit: %d)...\n", limit)
 
-	earthquakes, err := c.usgsClient.GetRecentEarthquakes(limit)
+	earthquakes, err := c.usgsClient.GetRecentEarthquakes(ctx, limit)
 	if err != nil {
 		return fmt.Errorf("failed to fetch recent earthquakes: %w", err)
 	}
@@ -50,7 +50,7 @@ func (c *EarthquakeCollector) CollectByTimeRange(ctx context.Context, startTime,
 		endTime.Format("2006-01-02 15:04:05"),
 		limit)
 
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(startTime, endTime, limit)
+	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(ctx, startTime, endTime, limit)
 	if err != nil {
 		return fmt.Errorf("failed to fetch earthquakes by time range: %w", err)
 	}
@@ -68,7 +68,7 @@ func (c *EarthquakeCollector) CollectByTimeRange(ctx context.Context, startTime,
 func (c *EarthquakeCollector) CollectByMagnitude(ctx context.Context, minMag, maxMag float64, limit int, filename string) error {
 	fmt.Printf("Collecting earthquakes with magnitude %.1f to %.1f (limit: %d)...\n", minMag, maxMag, limit)
 
-	earthquakes, err := c.usgsClient.GetEarthquakesByMagnitude(minMag, maxMag, limit)
+	earthquakes, err := c.usgsClient.GetEarthquakesByMagnitude(ctx, minMag, maxMag, limit)
 	if err != nil {
 		return fmt.Errorf("failed to fetch earthquakes by magnitude: %w", err)
 	}
@@ -90,7 +90,7 @@ func (c *EarthquakeCollector) CollectSignificant(ctx context.Context, startTime,
 		endTime.Format("2006-01-02 15:04:05"),
 		limit)
 
-	earthquakes, err := c.usgsClient.GetSignificantEarthquakes(startTime, endTime, limit)
+	earthquakes, err := c.usgsClient.GetSignificantEarthquakes(ctx, startTime, endTime, limit)
 	if err != nil {
 		return fmt.Errorf("failed to fetch significant earthquakes: %w", err)
 	}
@@ -106,10 +106,10 @@ func (c *EarthquakeCollector) CollectSignificant(ctx context.Context, startTime,
 
 // CollectByRegion collects earthquakes within a geographic region
 func (c *EarthquakeCollector) CollectByRegion(ctx context.Context, minLat, maxLat, minLon, maxLon float64, limit int, filename string) error {
-	fmt.Printf("Collecting earthquakes in region (%.2f,%.2f) to (%.2f,%.2f) (limit: %d)...\n",
-		minLat, minLon, maxLat, maxLon, limit)
+	fmt.Printf("Collecting earthquakes in region (lat: %.2f-%.2f, lon: %.2f-%.2f, limit: %d)...\n",
+		minLat, maxLat, minLon, maxLon, limit)
 
-	earthquakes, err := c.usgsClient.GetEarthquakesByRegion(minLat, maxLat, minLon, maxLon, limit)
+	earthquakes, err := c.usgsClient.GetEarthquakesByRegion(ctx, minLat, maxLat, minLon, maxLon, limit)
 	if err != nil {
 		return fmt.Errorf("failed to fetch earthquakes by region: %w", err)
 	}
@@ -123,44 +123,37 @@ func (c *EarthquakeCollector) CollectByRegion(ctx context.Context, minLat, maxLa
 	return nil
 }
 
-// CollectByCountry collects earthquakes filtered by country name
+// CollectByCountry collects earthquakes for a specific country
 func (c *EarthquakeCollector) CollectByCountry(ctx context.Context, country string, startTime, endTime time.Time, minMag, maxMag float64, limit int, filename string) error {
-	fmt.Printf("Collecting earthquakes in %s from %s to %s (magnitude %.1f-%.1f, limit: %d)...\n",
+	fmt.Printf("Collecting earthquakes for %s from %s to %s (magnitude: %.1f-%.1f, limit: %d)...\n",
 		country,
 		startTime.Format("2006-01-02 15:04:05"),
 		endTime.Format("2006-01-02 15:04:05"),
 		minMag, maxMag, limit)
 
-	// First, fetch earthquakes by time range and magnitude
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRangeAndMagnitude(startTime, endTime, minMag, maxMag, limit*2) // Fetch more to account for filtering
+	// For country-specific queries, we'll use time range and magnitude filtering
+	// and then filter by country name in the place field
+	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRangeAndMagnitude(ctx, startTime, endTime, minMag, maxMag, limit)
 	if err != nil {
-		return fmt.Errorf("failed to fetch earthquakes: %w", err)
+		return fmt.Errorf("failed to fetch earthquakes by country: %w", err)
 	}
 
-	// Filter earthquakes by country
-	var filteredEarthquakes []models.Earthquake
-	for _, eq := range earthquakes.Features {
-		if containsCountry(eq.Properties.Place, country) {
-			filteredEarthquakes = append(filteredEarthquakes, eq)
+	// Filter by country
+	var countryEarthquakes []models.Earthquake
+	for _, feature := range earthquakes.Features {
+		if containsCountry(feature.Properties.Place, country) {
+			countryEarthquakes = append(countryEarthquakes, feature)
 		}
 	}
 
-	// Limit the results
-	if len(filteredEarthquakes) > limit {
-		filteredEarthquakes = filteredEarthquakes[:limit]
-	}
-
-	// Create a new response with filtered earthquakes
+	// Create new response with filtered earthquakes
 	filteredResponse := &models.USGSResponse{
 		Type:     earthquakes.Type,
 		Metadata: earthquakes.Metadata,
-		Features: filteredEarthquakes,
+		Features: countryEarthquakes,
 	}
 
-	// Update metadata count
-	filteredResponse.Metadata.Count = len(filteredEarthquakes)
-
-	fmt.Printf("Found %d earthquakes in %s\n", len(filteredEarthquakes), country)
+	fmt.Printf("Found %d earthquakes in %s\n", len(countryEarthquakes), country)
 
 	if err := c.storage.SaveEarthquakes(ctx, filteredResponse); err != nil {
 		return fmt.Errorf("failed to save earthquakes: %w", err)
@@ -169,181 +162,115 @@ func (c *EarthquakeCollector) CollectByCountry(ctx context.Context, country stri
 	return nil
 }
 
-// CollectRecentData collects recent earthquakes and returns the data without saving
-func (c *EarthquakeCollector) CollectRecentData(limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting recent earthquakes (last hour, limit: %d)...\n", limit)
-
-	earthquakes, err := c.usgsClient.GetRecentEarthquakes(limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recent earthquakes: %w", err)
-	}
-
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
+// CollectRecentData collects recent earthquake data without saving
+func (c *EarthquakeCollector) CollectRecentData(ctx context.Context, limit int) (*models.USGSResponse, error) {
+	return c.usgsClient.GetRecentEarthquakes(ctx, limit)
 }
 
-// CollectRecentEarthquakes collects recent earthquakes with time-based filtering
+// CollectRecentEarthquakes collects recent earthquakes with smart deduplication
 func (c *EarthquakeCollector) CollectRecentEarthquakes(ctx context.Context, hoursBack int) (*models.USGSResponse, error) {
-	// Calculate time range: from X hours ago to now
 	endTime := time.Now()
 	startTime := endTime.Add(-time.Duration(hoursBack) * time.Hour)
 
-	fmt.Printf("Collecting earthquakes from %s to %s (last %d hours)...\n",
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		hoursBack)
-
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(startTime, endTime, 1000) // Use high limit for recent data
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch recent earthquakes: %w", err)
+	params := map[string]string{
+		"starttime": startTime.Format("2006-01-02T15:04:05"),
+		"endtime":   endTime.Format("2006-01-02T15:04:05"),
+		"limit":     "1000",
 	}
 
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
+	return c.usgsClient.GetEarthquakes(ctx, params)
 }
 
-// CollectRecentEarthquakesSmart collects earthquakes since the last collection time
+// CollectRecentEarthquakesSmart collects recent earthquakes with smart deduplication
 func (c *EarthquakeCollector) CollectRecentEarthquakesSmart(ctx context.Context, storage storage.Storage) error {
-	// Get last collection time
-	lastCollectionUnix, err := storage.GetLastCollectionTime(ctx, "earthquakes")
+	// Get recent earthquakes
+	earthquakes, err := c.CollectRecentEarthquakes(ctx, 1)
 	if err != nil {
-		return fmt.Errorf("failed to get last collection time: %w", err)
+		return fmt.Errorf("failed to collect recent earthquakes: %w", err)
 	}
 
-	lastCollection := time.Unix(lastCollectionUnix, 0)
-
-	// Add small buffer to ensure overlap (5 minutes)
-	startTime := lastCollection.Add(-5 * time.Minute)
-	endTime := time.Now()
-
-	fmt.Printf("Smart collection: collecting earthquakes from %s to %s (since last collection: %s)...\n",
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		lastCollection.Format("2006-01-02 15:04:05"))
-
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(startTime, endTime, 1000)
+	// Load existing earthquakes from storage
+	existingData, err := storage.LoadEarthquakes(ctx, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("failed to fetch earthquakes: %w", err)
+		// If no existing data, save all new earthquakes
+		return storage.SaveEarthquakes(ctx, earthquakes)
 	}
 
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-
-	// Save earthquakes (database will handle duplicates with upsert logic)
-	if err := storage.SaveEarthquakes(ctx, earthquakes); err != nil {
-		return fmt.Errorf("failed to save earthquakes: %w", err)
+	// Create a map of existing earthquake IDs
+	existingIDs := make(map[string]bool)
+	for _, feature := range existingData.Features {
+		existingIDs[feature.ID] = true
 	}
 
-	// Update collection time
-	if err := storage.UpdateLastCollectionTime(ctx, "earthquakes", endTime.Unix()); err != nil {
-		return fmt.Errorf("failed to update collection time: %w", err)
-	}
-
-	// Log the collection
-	if err := storage.LogCollection(ctx, "earthquakes", "usgs", startTime.Unix(), len(earthquakes.Features), "success", ""); err != nil {
-		fmt.Printf("Warning: failed to log collection: %v\n", err)
-	}
-
-	fmt.Printf("Successfully collected and saved %d earthquakes\n", len(earthquakes.Features))
-	return nil
-}
-
-// CollectByTimeRangeData collects earthquakes within a specific time range and returns the data without saving
-func (c *EarthquakeCollector) CollectByTimeRangeData(startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting earthquakes from %s to %s (limit: %d)...\n",
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		limit)
-
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRange(startTime, endTime, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch earthquakes by time range: %w", err)
-	}
-
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
-}
-
-// CollectByMagnitudeData collects earthquakes within a magnitude range and returns the data without saving
-func (c *EarthquakeCollector) CollectByMagnitudeData(minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting earthquakes with magnitude %.1f to %.1f (limit: %d)...\n", minMag, maxMag, limit)
-
-	earthquakes, err := c.usgsClient.GetEarthquakesByMagnitude(minMag, maxMag, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch earthquakes by magnitude: %w", err)
-	}
-
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
-}
-
-// CollectSignificantData collects significant earthquakes and returns the data without saving
-func (c *EarthquakeCollector) CollectSignificantData(startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting significant earthquakes (M4.5+) from %s to %s (limit: %d)...\n",
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		limit)
-
-	earthquakes, err := c.usgsClient.GetSignificantEarthquakes(startTime, endTime, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch significant earthquakes: %w", err)
-	}
-
-	fmt.Printf("Found %d significant earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
-}
-
-// CollectByRegionData collects earthquakes within a geographic region and returns the data without saving
-func (c *EarthquakeCollector) CollectByRegionData(minLat, maxLat, minLon, maxLon float64, limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting earthquakes in region (%.2f,%.2f) to (%.2f,%.2f) (limit: %d)...\n",
-		minLat, minLon, maxLat, maxLon, limit)
-
-	earthquakes, err := c.usgsClient.GetEarthquakesByRegion(minLat, maxLat, minLon, maxLon, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch earthquakes by region: %w", err)
-	}
-
-	fmt.Printf("Found %d earthquakes\n", len(earthquakes.Features))
-	return earthquakes, nil
-}
-
-// CollectByCountryData collects earthquakes filtered by country name and returns the data without saving
-func (c *EarthquakeCollector) CollectByCountryData(country string, startTime, endTime time.Time, minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
-	fmt.Printf("Collecting earthquakes in %s from %s to %s (magnitude %.1f-%.1f, limit: %d)...\n",
-		country,
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		minMag, maxMag, limit)
-
-	// First, fetch earthquakes by time range and magnitude
-	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRangeAndMagnitude(startTime, endTime, minMag, maxMag, limit*2) // Fetch more to account for filtering
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch earthquakes: %w", err)
-	}
-
-	// Filter earthquakes by country
-	var filteredEarthquakes []models.Earthquake
-	for _, eq := range earthquakes.Features {
-		if containsCountry(eq.Properties.Place, country) {
-			filteredEarthquakes = append(filteredEarthquakes, eq)
+	// Filter out duplicates
+	var newEarthquakes []models.Earthquake
+	for _, feature := range earthquakes.Features {
+		if !existingIDs[feature.ID] {
+			newEarthquakes = append(newEarthquakes, feature)
 		}
 	}
 
-	// Limit the results
-	if len(filteredEarthquakes) > limit {
-		filteredEarthquakes = filteredEarthquakes[:limit]
+	if len(newEarthquakes) == 0 {
+		fmt.Println("No new earthquakes found")
+		return nil
 	}
 
-	// Create a new response with filtered earthquakes
+	// Create new response with only new earthquakes
+	newResponse := &models.USGSResponse{
+		Type:     earthquakes.Type,
+		Metadata: earthquakes.Metadata,
+		Features: newEarthquakes,
+	}
+
+	fmt.Printf("Found %d new earthquakes\n", len(newEarthquakes))
+
+	return storage.SaveEarthquakes(ctx, newResponse)
+}
+
+// CollectByTimeRangeData collects earthquake data by time range without saving
+func (c *EarthquakeCollector) CollectByTimeRangeData(ctx context.Context, startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
+	return c.usgsClient.GetEarthquakesByTimeRange(ctx, startTime, endTime, limit)
+}
+
+// CollectByMagnitudeData collects earthquake data by magnitude without saving
+func (c *EarthquakeCollector) CollectByMagnitudeData(ctx context.Context, minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
+	return c.usgsClient.GetEarthquakesByMagnitude(ctx, minMag, maxMag, limit)
+}
+
+// CollectSignificantData collects significant earthquake data without saving
+func (c *EarthquakeCollector) CollectSignificantData(ctx context.Context, startTime, endTime time.Time, limit int) (*models.USGSResponse, error) {
+	return c.usgsClient.GetSignificantEarthquakes(ctx, startTime, endTime, limit)
+}
+
+// CollectByRegionData collects earthquake data by region without saving
+func (c *EarthquakeCollector) CollectByRegionData(ctx context.Context, minLat, maxLat, minLon, maxLon float64, limit int) (*models.USGSResponse, error) {
+	return c.usgsClient.GetEarthquakesByRegion(ctx, minLat, maxLat, minLon, maxLon, limit)
+}
+
+// CollectByCountryData collects earthquake data by country without saving
+func (c *EarthquakeCollector) CollectByCountryData(ctx context.Context, country string, startTime, endTime time.Time, minMag, maxMag float64, limit int) (*models.USGSResponse, error) {
+	// For country-specific queries, we'll use time range and magnitude filtering
+	// and then filter by country name in the place field
+	earthquakes, err := c.usgsClient.GetEarthquakesByTimeRangeAndMagnitude(ctx, startTime, endTime, minMag, maxMag, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch earthquakes by country: %w", err)
+	}
+
+	// Filter by country
+	var countryEarthquakes []models.Earthquake
+	for _, feature := range earthquakes.Features {
+		if containsCountry(feature.Properties.Place, country) {
+			countryEarthquakes = append(countryEarthquakes, feature)
+		}
+	}
+
+	// Create new response with filtered earthquakes
 	filteredResponse := &models.USGSResponse{
 		Type:     earthquakes.Type,
 		Metadata: earthquakes.Metadata,
-		Features: filteredEarthquakes,
+		Features: countryEarthquakes,
 	}
 
-	// Update metadata count
-	filteredResponse.Metadata.Count = len(filteredEarthquakes)
-
-	fmt.Printf("Found %d earthquakes in %s\n", len(filteredEarthquakes), country)
 	return filteredResponse, nil
 }
 
