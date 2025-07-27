@@ -37,6 +37,17 @@ func (a *App) outputToStdout(data interface{}) error {
 	return encoder.Encode(data)
 }
 
+// getOutputDir returns the output directory, respecting both configuration and command flags
+func (a *App) getOutputDir(cmd *cobra.Command) string {
+	// Check for custom output directory flag
+	outputDir, _ := cmd.Flags().GetString("output-dir")
+	if outputDir != "" {
+		return outputDir
+	}
+	// Use configured output directory
+	return a.getOutputDir(cmd)
+}
+
 // NewApp creates a new CLI application
 func NewApp() *App {
 	app := &App{
@@ -382,7 +393,7 @@ func (a *App) runRecentEarthquakes(cmd *cobra.Command, args []string) error {
 		store = pgStore
 		defer store.Close()
 	} else {
-		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		jsonStore := storage.NewJSONStorage(a.getOutputDir(cmd))
 		store = jsonStore
 	}
 
@@ -441,7 +452,7 @@ func (a *App) runTimeRangeEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -471,7 +482,7 @@ func (a *App) runMagnitudeEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -511,7 +522,7 @@ func (a *App) runSignificantEarthquakes(cmd *cobra.Command, args []string) error
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -543,7 +554,7 @@ func (a *App) runRegionEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -600,13 +611,7 @@ func (a *App) runCountryEarthquakes(cmd *cobra.Command, args []string) error {
 		limit = a.cfg.Collection.MaxLimit
 	}
 
-	// Check for custom output directory flag
-	outputDir, _ := cmd.Flags().GetString("output-dir")
-	if outputDir == "" {
-		outputDir = a.cfg.Storage.OutputDir
-	}
-
-	store := storage.NewJSONStorage(outputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	usgsClient := api.NewUSGSClient(a.cfg.API.USGS.BaseURL, a.cfg.API.USGS.Timeout)
 	collector := collector.NewEarthquakeCollector(usgsClient, store)
 	ctx := context.Background()
@@ -634,7 +639,7 @@ func (a *App) runCollectFaults(cmd *cobra.Command, args []string) error {
 		store = pgStore
 		defer store.Close()
 	} else {
-		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		jsonStore := storage.NewJSONStorage(a.getOutputDir(cmd))
 		store = jsonStore
 	}
 
@@ -659,7 +664,7 @@ func (a *App) runUpdateFaults(cmd *cobra.Command, args []string) error {
 		store = pgStore
 		defer store.Close()
 	} else {
-		jsonStore := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+		jsonStore := storage.NewJSONStorage(a.getOutputDir(cmd))
 		store = jsonStore
 	}
 
@@ -674,7 +679,7 @@ func (a *App) runValidate(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	ctx := context.Background()
 
 	if file != "" {
@@ -747,7 +752,7 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 	file, _ := cmd.Flags().GetString("file")
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	ctx := context.Background()
 
 	if file != "" {
@@ -833,7 +838,7 @@ func (a *App) runStats(cmd *cobra.Command, args []string) error {
 func (a *App) runList(cmd *cobra.Command, args []string) error {
 	dataType, _ := cmd.Flags().GetString("type")
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 
 	if dataType == "all" {
 		fmt.Println("Available data files:")
@@ -876,7 +881,7 @@ func (a *App) runPurge(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetBool("force")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	ctx := context.Background()
 
 	if dryRun {
@@ -992,7 +997,7 @@ func (a *App) runHealth(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check storage
-	store := storage.NewJSONStorage(a.cfg.Storage.OutputDir)
+	store := storage.NewJSONStorage(a.getOutputDir(cmd))
 	_, err = store.ListFiles("earthquakes")
 	if err != nil {
 		fmt.Printf("  ✗ Storage: %v\n", err)
@@ -1894,3 +1899,5 @@ func (a *App) runDatabaseStatus(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+
+// getOutputDir returns the output directory, respecting both configuration and command flags
